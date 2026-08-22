@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-{{nonce}}';">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--vscode-editor-background, #1e1e1e);
+    color: var(--vscode-editor-foreground, #d4d4d4);
+    font-family: var(--vscode-editor-font-family, 'Menlo', 'Consolas', 'Courier New', monospace);
+    font-size: var(--vscode-editor-font-size, 13px);
+    overflow: hidden;
+  }
+  #toolbar {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 3px 8px; border-bottom: 1px solid var(--vscode-panel-border, #3f3f3f);
+    font-size: 12px; color: var(--vscode-descriptionForeground, #9d9d9d);
+    background: var(--vscode-editor-background, #1e1e1e); user-select: none;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+  .st-off { background: #888888; }
+  .st-connecting { background: #dcdcaa; }
+  .st-busy { background: #d7ba7d; }
+  .st-ready { background: #7cb342; }
+  .st-err { background: #f48771; }
+  #kstatus { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+  .tb-title { flex: none; font-weight: 600; }
+  .tb-spacer { flex: 1; }
+  button {
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #ffffff);
+    border: 1px solid transparent; padding: 2px 10px; cursor: pointer;
+    font-size: 12px; font-family: inherit;
+  }
+  button:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
+  #output { flex: 1 1 auto; overflow-y: auto; padding: 4px 0 12px; line-height: 1.45; }
+  .block { margin: 0; }
+  .exec { padding: 5px 8px 0 8px; white-space: pre-wrap; word-break: break-word; }
+  .prompt { font-weight: 600; }
+  .prompt-in { color: #4ec9b0; }
+  .prompt-out { color: #569cd6; }
+  .code { color: var(--vscode-editor-foreground, #d4d4d4); }
+  .out { padding: 0 8px 8px 8px; }
+  .stream { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; }
+  .stream-stdout { color: var(--vscode-editor-foreground, #d4d4d4); }
+  .stream-stderr { color: #f48771; }
+  .outval { margin: 2px 0 0 0; white-space: pre-wrap; word-break: break-word; }
+  .imgout { margin-top: 6px; }
+  .imgout img { max-width: 100%; height: auto; display: block; }
+  .banner {
+    margin: 4px 8px 0 8px; color: var(--vscode-descriptionForeground, #9d9d9d);
+    font: inherit; white-space: pre-wrap; word-break: break-word;
+  }
+  .banner-err { color: #f48771; }
+  .trunc { color: var(--vscode-descriptionForeground, #9d9d9d); font-style: italic; }
+  #inputbar {
+    flex: none; position: relative; display: flex; align-items: flex-end; gap: 8px;
+    padding: 5px 8px; border-top: 1px solid var(--vscode-panel-border, #3f3f3f);
+    background: var(--vscode-input-background, #1f1f1f);
+  }
+  #prompt { flex: none; font-weight: 600; color: #4ec9b0; padding-bottom: 2px; user-select: none; }
+  #input {
+    flex: 1; background: transparent; border: none; outline: none; resize: none;
+    color: var(--vscode-input-foreground, #d4d4d4);
+    font: inherit; line-height: 1.5; min-height: 1.5em; max-height: 220px; padding: 0 0 2px 0;
+  }
+  #input::placeholder { color: var(--vscode-input-placeholderForeground, #6f6f6f); }
+  #completions {
+    position: absolute; left: 8px; right: 8px; bottom: calc(100% + 2px);
+    max-height: 220px; overflow-y: auto; display: none; z-index: 10;
+    background: var(--vscode-editorWidget-background, #252526);
+    border: 1px solid var(--vscode-editorWidget-border, #3f3f3f);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    font-size: 12px;
+  }
+  .ci { padding: 2px 8px; cursor: pointer; white-space: pre; }
+  .ci.sel { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <span class="dot st-off" id="dot"></span>
+    <span id="kstatus">未连接</span>
+    <span class="tb-title">IPython Console</span>
+    <span class="tb-spacer"></span>
+    <button id="btn-restart" title="重启内核">重启内核</button>
+    <button id="btn-clear" title="清屏（Ctrl+L 同效）">清屏</button>
+    <button id="btn-quit" title="关闭控制台并终止内核进程（弹确认）">退出</button>
+  </div>
+  <div id="output"></div>
+  <div id="inputbar">
+    <span id="prompt">In [*]:</span>
+    <textarea id="input" rows="1" spellcheck="false" placeholder="回车执行 · Tab/自动补全 · ↑↓历史 · 无选区Ctrl+C中断 · Shift+Enter 换行 · Ctrl+L 清屏"></textarea>
+    <div id="completions"></div>
+  </div>
+
+<script id="pure" nonce="{{nonce}}">
+/* ---- 纯函数：可被 node 直接提取测试 ---- */
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+var ANSI_COLORS = {
+  '30': '#808080', '31': '#f48771', '32': '#89d185', '33': '#dcdcaa',
+  '34': '#75beff', '35': '#c586c0', '36': '#4ec9b0', '37': '#d4d4d4',
+  '90': '#808080', '91': '#f48771', '92': '#89d185', '93': '#dcdcaa',
+  '94': '#75beff', '95': '#c586c0', '96': '#4ec9b0', '97': '#ffffff'
+};
+
+function ansiToHtml(text) {
+  var parts = [];
+  var seg = '';
+  var style = null;
+  var bold = false;
+  function flush() {
+    if (seg === '') return;
+    var st = '';
+    if (bold) st += 'font-weight:600;';
+    if (style) st += 'color:' + style + ';';
+    parts.push(st ? '<span style="' + st + '">' + esc(seg) + '</span>' : esc(seg));
+    seg = '';
+  }
+  var i = 0;
+  while (i < text.length) {
+    var ch = text.charAt(i);
+    if (ch === '\x1b' && text.charAt(i + 1) === '[') {
+      var j = text.indexOf('m', i + 2);
+      if (j === -1) { seg += text.slice(i); break; }
+      var codes = text.slice(i + 2, j).split(';');
+      var newStyle = style, newBold = bold;
+      for (var k = 0; k < codes.length; k++) {
+        var c = codes[k];
+        if (c === '0') { newStyle = null; newBold = false; }
+        else if (c === '1') { newBold = true; }
+        else if (ANSI_COLORS.hasOwnProperty(c)) { newStyle = ANSI_COLORS[c]; }
+      }
+      if (newStyle !== style || newBold !== bold) {
+        flush();
+        style = newStyle;
+        bold = newBold;
+      }
+      i = j + 1;
+    } else {
+      seg += ch;
+      i++;
+    }
+  }
+  flush();
+  return parts.join('');
+}
+</script>
+
+<script nonce="{{nonce}}">
+(function () {
+  'use strict';
+
+  // 任何运行时错误直接显示到输出区（防“按钮静默失效”谜案）
+  window.addEventListener('error', function (e) {
+    var out = document.getElementById('output');
+    if (out) {
+      var b = document.createElement('div');
+      b.innerHTML = '<pre class="banner banner-err">[前端错误] ' + esc((e && e.message) || 'unknown error') + '</pre>';
+      out.appendChild(b);
+    }
+  });
+
+  var vscodeApi = acquireVsCodeApi();
+
+  var output = document.getElementById('output');
+  var inputEl = document.getElementById('input');
+  var promptEl = document.getElementById('prompt');
+  var dotEl = document.getElementById('dot');
+  var statusEl = document.getElementById('kstatus');
+  var compEl = document.getElementById('completions');
+  var btnRestart = document.getElementById('btn-restart');
+  var btnClear = document.getElementById('btn-clear');
+  var btnQuit = document.getElementById('btn-quit');
+
+  var BLOCK_CAP = 300;
+  var PRE_CHAR_CAP = 150000;
+  var blocks = new Map();   // reqId -> block element
+  var nextIn = 1;           // 本地估算的 In 序号（未收到 exec_input 前用）
+  var kernelBusy = false;
+  var kernelReadyWeb = false;   // 收到 hello 后置 true
+
+  // ---- 输入历史（qtconsole 语义）----
+  var hist = [];
+  var histIdx = 0;      // 0..hist.length；hist.length 表示草稿位置
+  var histDraft = '';
+
+  // ---- 自动补全 ----
+  var completionTimer = null;
+  var completionData = null;   // {start, end, matches, sel}
+  function setStatus(cls, text) {
+    dotEl.className = 'dot st-' + cls;
+    statusEl.textContent = text;
+  }
+
+  function maybeScroll() {
+    var el = output;
+    var nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }
+
+  function trimNode(container) {
+    while (container.children.length > BLOCK_CAP) {
+      container.removeChild(container.firstChild);
+    }
+  }
+
+  function addBanner(text, cls) {
+    var block = document.createElement('div');
+    block.className = 'block';
+    block.innerHTML = '<pre class="banner' + (cls ? ' ' + cls : '') + '">' + esc(text) + '</pre>';
+    output.appendChild(block);
+    trimNode(output);
+    maybeScroll();
+    return block;
+  }
+
+  function blockFor(req) {
+    if (!blocks.has(req)) {
+      var el = document.createElement('div');
+      el.className = 'block';
+      var out = document.createElement('div');
+      out.className = 'out';
+      el.appendChild(out);
+      output.appendChild(el);
+      trimNode(output);
+      blocks.set(req, el);
+      maybeScroll();
+    }
+    return blocks.get(req);
+  }
+
+  function execEl(el, count, code) {
+    var d = document.createElement('div');
+    d.className = 'exec';
+    d.innerHTML = '<span class="prompt prompt-in">In [' + count + ']:</span> <span class="code">' + esc(code) + '</span>';
+    el.insertBefore(d, el.firstChild);
+    maybeScroll();
+  }
+
+  function getStream(el, cls) {
+    var out = el.querySelector('.out');
+    var pre = out.lastElementChild;
+    if (pre && pre.classList.contains('stream-' + cls)) return pre;
+    var np = document.createElement('pre');
+    np.className = 'stream stream-' + cls;
+    out.appendChild(np);
+    return np;
+  }
+
+  function appendStream(el, text, cls) {
+    var pre = getStream(el, cls);
+    pre.insertAdjacentHTML('beforeend', ansiToHtml(text));
+    if (pre.textContent.length > PRE_CHAR_CAP) {
+      pre.textContent = pre.textContent.slice(-(PRE_CHAR_CAP * 0.6));
+      pre.insertAdjacentHTML('afterbegin', '<span class="trunc">[较早输出已截断…]</span>');
+    }
+    maybeScroll();
+  }
+
+  function addOutValue(el, count, text) {
+    var d = document.createElement('pre');
+    d.className = 'outval';
+    d.innerHTML = '<span class="prompt prompt-out">Out[' + count + ']:</span> ' + esc(text);
+    el.querySelector('.out').appendChild(d);
+    maybeScroll();
+  }
+
+  function addDisplayImg(el, b64) {
+    var d = document.createElement('div');
+    d.className = 'imgout';
+    d.innerHTML = '<img src="data:image/png;base64,' + b64 + '">';
+    el.querySelector('.out').appendChild(d);
+    maybeScroll();
+  }
+
+  function displayPlain(el, text) {
+    var d = document.createElement('pre');
+    d.className = 'outval';
+    d.textContent = text;
+    el.querySelector('.out').appendChild(d);
+    maybeScroll();
+  }
+
+  /* ---- 自动补全 ---- */
+  function completionVisible() {
+    return completionData !== null && compEl.style.display !== 'none';
+  }
+
+  function completionHide() {
+    completionData = null;
+    compEl.style.display = 'none';
+    compEl.innerHTML = '';
+  }
+
+  function completionRender() {
+    var items = compEl.children;
+    for (var i = 0; i < items.length; i++) {
+      items[i].className = 'ci' + (i === completionData.sel ? ' sel' : '');
+    }
+    var sel = items[completionData.sel];
+    if (sel && sel.scrollIntoView) {
+      sel.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function completionShow(start, end, matches) {
+    if (!matches.length) { completionHide(); return; }
+    completionData = { start: start, end: end, matches: matches.slice(0, 80), sel: 0 };
+    compEl.innerHTML = '';
+    for (var i = 0; i < completionData.matches.length; i++) {
+      (function (idx) {
+        var d = document.createElement('div');
+        d.className = 'ci' + (idx === 0 ? ' sel' : '');
+        d.textContent = completionData.matches[idx];
+        d.addEventListener('mousedown', function (ev) {
+          ev.preventDefault();          // 保持输入框焦点
+          completionData.sel = idx;
+          completionAccept();
+        });
+        compEl.appendChild(d);
+      })(i);
+    }
+    completionRender();
+    compEl.style.display = 'block';
+  }
+
+  function completionMove(dir) {
+    if (!completionVisible()) return;
+    var n = completionData.matches.length;
+    completionData.sel = (completionData.sel + dir + n) % n;
+    completionRender();
+  }
+
+  function completionAccept() {
+    if (!completionVisible()) return;
+    var m = completionData.matches[completionData.sel];
+    if (m === undefined) { completionHide(); return; }
+    var code = inputEl.value;
+    inputEl.value = code.slice(0, completionData.start) + m + code.slice(completionData.end);
+    var cp = completionData.start + m.length;
+    inputEl.setSelectionRange(cp, cp);
+    completionHide();
+    autosize();
+  }
+
+  function shouldComplete(code, pos) {
+    return /[A-Za-z0-9_.\[\]'"@\s]$/.test(code.slice(0, pos));
+  }
+
+  function scheduleCompletion() {
+    if (kernelBusy) { completionHide(); return; }
+    if (completionTimer) clearTimeout(completionTimer);
+    completionTimer = setTimeout(requestCompletion, 180);
+  }
+
+  function requestCompletion() {
+    if (kernelBusy) { completionHide(); return; }
+    if (completionTimer) { clearTimeout(completionTimer); completionTimer = null; }
+    var code = inputEl.value;
+    var pos = inputEl.selectionStart;
+    if (!shouldComplete(code, pos)) { completionHide(); return; }
+    vscodeApi.postMessage({ type: 'complete', code: code, cursorPos: pos });
+  }
+
+  /* ---- 历史 ---- */
+  function historyMove(dir) {
+    if (hist.length === 0) return;
+    if (histIdx === hist.length && dir < 0) {
+      histDraft = inputEl.value;        // 首次上溯时保存当前草稿
+    }
+    var next = histIdx + dir;
+    if (next < 0) next = 0;
+    if (next > hist.length) next = hist.length;
+    histIdx = next;
+    if (histIdx === hist.length) {
+      inputEl.value = histDraft;
+    } else {
+      inputEl.value = hist[histIdx];
+    }
+    inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+    autosize();
+    completionHide();
+  }
+
+  /* ---- 内核事件 ---- */
+  function handleKernel(ev) {
+    switch (ev.t) {
+      case 'status':
+        setStatus('connecting', ev.text || '连接中…');
+        break;
+      case 'hello':
+        if (connTimer) { clearTimeout(connTimer); connTimer = null; }
+        kernelReadyWeb = true;
+        kernelBusy = false;
+        setStatus('ready', '就绪 · Python ' + ev.python);
+        addBanner('Python ' + ev.python + ' | IPython kernel (ipykernel ' + ev.ipykernel + ')\n↑↓ 历史 · Tab/实时联想补全 · 无选区时 Ctrl+C 中断执行\n');
+        break;
+      case 'launch_error':
+        setStatus('err', '启动失败');
+        addBanner('内核启动失败：\n' + (ev.text || '') + '\n请检查设置 ipythonConsoleDemo.pythonPath 指向含 ipykernel 的解释器\n', 'banner-err');
+        break;
+      case 'boot':
+        addBanner('（启动中）' + (ev.text || '') + '\n');
+        break;
+      case 'host_stderr':
+        addBanner('（内核日志）' + (ev.text || '') + '\n');
+        break;
+      case 'busy':
+        kernelBusy = true;
+        setStatus('busy', '运行中');
+        completionHide();
+        nextIn++;
+        promptEl.textContent = 'In [' + nextIn + ']:';
+        break;
+      case 'idle':
+        kernelBusy = false;
+        setStatus('ready', '就绪');
+        break;
+      case 'exec_input':
+        nextIn = ev.count + 1;
+        promptEl.textContent = 'In [*]:';
+        execEl(blockFor(ev.i), ev.count, ev.code);
+        break;
+      case 'stream':
+        appendStream(blockFor(ev.i), ev.text, ev.name === 'stderr' ? 'stderr' : 'stdout');
+        break;
+      case 'result':
+        addOutValue(blockFor(ev.i), ev.count, ev.text);
+        break;
+      case 'display':
+        if (ev.mime === 'image/png') addDisplayImg(blockFor(ev.i), ev.data);
+        else displayPlain(blockFor(ev.i), ev.data);
+        break;
+      case 'error':
+        appendStream(blockFor(ev.i), (ev.trace || ev.evalue || '') + '\n', 'stderr');
+        break;
+      case 'interrupted':
+        appendStream(blockFor(ev.i), 'KeyboardInterrupt\n', 'stderr');
+        break;
+      case 'notice':
+        if (ev.i !== undefined && ev.i !== null) appendStream(blockFor(ev.i), ev.text + '\n', 'stdout');
+        else addBanner((ev.text || '') + '\n');
+        break;
+      case 'input':
+        appendStream(blockFor(ev.i), '（内核请求 input()：' + ev.prompt + '—— 第一版自动返回空）\n', 'stderr');
+        break;
+      case 'complete':
+        completionShow(ev.start, ev.end, ev.matches || []);
+        break;
+      default:
+        break;
+    }
+  }
+
+  window.addEventListener('message', function (m) {
+    var msg = m.data;
+    if (msg && msg.type === 'kernel') handleKernel(msg);
+  });
+
+  /* ---- 输入 ---- */
+  function runInput() {
+    var code = inputEl.value;
+    if (!code.trim()) return;
+    if (hist[hist.length - 1] !== code) hist.push(code);
+    histIdx = hist.length;
+    vscodeApi.postMessage({ type: 'execute', code: code });
+    inputEl.value = '';
+    autosize();
+    completionHide();
+  }
+
+  function clearScreen() {
+    output.innerHTML = '';
+    blocks.clear();
+    addBanner('已清屏（In 序号保留，与 qtconsole %clear 一致）· Ctrl+L 同效\n');
+  }
+
+  function autosize() {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 220) + 'px';
+  }
+
+  inputEl.addEventListener('keydown', function (ev) {
+    if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (completionVisible()) completionMove(-1);
+      else historyMove(-1);
+      return;
+    }
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      if (completionVisible()) completionMove(1);
+      else historyMove(1);
+      return;
+    }
+    if (ev.key === 'Tab') {
+      ev.preventDefault();
+      if (completionVisible()) completionAccept();
+      else requestCompletion();
+      return;
+    }
+    if (ev.key === 'Escape') {
+      completionHide();
+      return;
+    }
+    if (ev.key === 'c' && ev.ctrlKey) {
+      // qtconsole 语义：有选区时 Ctrl+C=复制（不拦截）；无选区时=中断
+      if (inputEl.selectionStart !== inputEl.selectionEnd) return;
+      ev.preventDefault();
+      vscodeApi.postMessage({ type: 'interrupt' });
+      return;
+    }
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      runInput();
+      return;
+    }
+    if (ev.key === 'l' && ev.ctrlKey) {
+      ev.preventDefault();
+      clearScreen();
+    }
+  });
+  inputEl.addEventListener('input', function () {
+    autosize();
+    scheduleCompletion();
+  });
+  inputEl.addEventListener('blur', function () {
+    setTimeout(completionHide, 150);
+  });
+  btnRestart.addEventListener('click', function () {
+    blocks.clear();
+    hist = [];
+    histIdx = 0;
+    vscodeApi.postMessage({ type: 'restart' });
+  });
+  btnQuit.addEventListener('click', function () {
+    vscodeApi.postMessage({ type: 'quit' });
+  });
+  btnClear.addEventListener('click', clearScreen);
+
+  var connTimer = setTimeout(function () {
+    addBanner('25 秒未收到内核响应。\n若按钮也无反应，此面板可能未被扩展接管（僵尸面板）：请点标签栏 × 关闭本面板，\n然后按 Ctrl+Alt+O 重新打开即可恢复。\n', 'banner-err');
+  }, 25000);
+  addBanner('IPython Console · 前端 v0.2.2 · 正在连接 IPython kernel…');
+  // 扩展未激活时首次 connect 会丢失（窗口恢复场景），每 5 秒自动重发直到 hello
+  function ensureConnect() {
+    vscodeApi.postMessage({ type: 'connect' });
+    if (!kernelReadyWeb) setTimeout(ensureConnect, 5000);
+  }
+  ensureConnect();
+})();
+</script>
+</body>
+</html>

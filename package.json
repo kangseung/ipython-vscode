@@ -1,0 +1,69 @@
+{
+  "name": "ipy-console-demo",
+  "displayName": "IPython Console Demo",
+  "description": "qtconsole 手感的 IPython 控制台（真实 ipykernel）",
+  "version": "0.2.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onWebviewPanel:ipyConsoleDemo",
+    "onCommand:ipyDemo.open",
+    "onCommand:ipyDemo.sendSelection"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "IPython Console Demo",
+      "properties": {
+        "ipythonConsoleDemo.pythonPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "内核解释器路径（需已安装 ipykernel 与 jupyter_client）。留空自动探测：`/opt/anaconda3/bin/python` → `python3`"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "ipyDemo.open",
+        "title": "打开 IPython 控制台",
+        "category": "IPython Console",
+        "icon": "media/ipython.svg"
+      },
+      {
+        "command": "ipyDemo.sendSelection",
+        "title": "发送选中/当前行到 IPython 控制台",
+        "category": "IPython Console"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "ipyDemo.open",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "ipyDemo.sendSelection",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "ipyDemo.open",
+        "key": "ctrl+alt+o"
+      },
+      {
+        "command": "ipyDemo.sendSelection",
+        "key": "shift+enter",
+        "when": "editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !terminalFocus && !notebookEditorFocused && !inSnippetMode"
+      }
+    ]
+  }
+}

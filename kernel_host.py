@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""IPython kernel 管家：桥接 VS Code 扩展(stdio NDJSON) 与本地 ipykernel(ZMQ)。
+
+手动 spawn ipykernel（避开 jupyter_client 8.x KernelManager 的 asyncio 坑），
+用 BlockingKernelClient 走纯同步 ZMQ 通道。
+
+协议：
+  stdin  读 JSON 行命令：{"op":"execute","i":N,"code":...} {"op":"interrupt"} {"op":"restart"} {"op":"shutdown"}
+  stdout 写 JSON 行事件：hello/busy/idle/exec_input/stream/result/display/error/notice/input
+
+富显示策略：image/png 优先（matplotlib 内嵌图），无 PNG 时取 text/plain
+（DataFrame 等按 IPython 原版文字表格渲染，不使用 text/html）。
+
+调试：设置环境变量 IPYHOST_DEBUG=1 在 stderr 打印逐条 iopub。
+"""
+import atexit
+import json
+import os
+import queue
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+
+from jupyter_client import BlockingKernelClient
+from jupyter_client.connect import write_connection_file
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+DEBUG = os.environ.get("IPYHOST_DEBUG") == "1"
+
+
+def dbg(*a):
+    if DEBUG:
+        sys.stderr.write("[dbg] " + " ".join(str(x) for x in a) + "\n")
+        sys.stderr.flush()
+
+
+def _rand_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def send(obj):
+    line = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+    dbg("SEND", line[:100])
+    os.write(1, line.encode("utf-8") + b"\n")
+class KernelHost:
+    def __init__(self):
+        self.proc = None
+        self.kc = None
+        self.cf = None
+
+    # ---- 生命周期 ----
+    def start(self):
+        fd, self.cf = tempfile.mkstemp(prefix="ipyhost-", suffix=".json")
+        os.close(fd)
+        write_connection_file(
+            self.cf,
+            ip="127.0.0.1",
+            shell_port=_rand_port(),
+            iopub_port=_rand_port(),
+            stdin_port=_rand_port(),
+            control_port=_rand_port(),
+            hb_port=_rand_port(),
+        )
+        send({"t": "boot", "text": "准备启动 ipykernel 子进程…"})
+        self.proc = subprocess.Popen(
+            [sys.executable, "-m", "ipykernel_launcher", "-f", self.cf],
+            stdout=subprocess.DEVNULL,
+            stderr=None,  # kernel 日志透传到本进程 stderr（扩展可观测）
+        )
+        send({"t": "boot", "text": "连接内核通道（等待就绪）…"})
+        self.kc = BlockingKernelClient(connection_file=self.cf)
+        self.kc.load_connection_file()
+        self.kc.start_channels()
+        self.kc.wait_for_ready(timeout=20)  # 20 秒无响应即抛错 → launch_error 红字
+        send({"t": "boot", "text": "内核就绪，启用 matplotlib inline…"})
+        self._setup()
+        self._announce()
+
+    def _setup(self):
+        # 自动启用 matplotlib inline（与 VS Code/Jupyter 默认一致）：图内嵌为 PNG。
+        # silent 执行，不占 In 序号、不广播 execute_input。
+        try:
+            mid = self.kc.execute("%matplotlib inline", silent=True)
+            while True:
+                msg = self.kc.get_iopub_msg(timeout=10)
+                if (msg.get("parent_header") or {}).get("msg_id") != mid:
+                    continue
+                if msg["msg_type"] == "status" \
+                        and msg["content"].get("execution_state") == "idle":
+                    break
+        except Exception:
+            pass  # 无 matplotlib 时静默跳过
+
+    def restart(self):
+        self._shutdown_kernel()
+        self.start()
+
+    def _shutdown_kernel(self):
+        try:
+            self.kc.stop_channels()
+        except Exception:
+            pass
+        if self.proc and self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=5)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+        if self.cf and os.path.exists(self.cf):
+            try:
+                os.remove(self.cf)
+            except Exception:
+                pass
+        self.proc = None
+        self.kc = None
+
+    def shutdown(self):
+        self._shutdown_kernel()
+
+    def is_alive(self):
+        return bool(self.proc and self.proc.poll() is None)
+
+    def _announce(self):
+        try:
+            import ipykernel
+            iv = ipykernel.__version__
+        except Exception:
+            iv = "?"
+        send({
+            "t": "hello",
+            "python": sys.version.split()[0],
+            "ipykernel": iv,
+            "cwd": os.getcwd(),
+        })
+
+    # ---- 执行 ----
+    def execute(self, req_id, code):
+        send({"i": req_id, "t": "busy"})
+        msg_id = self.kc.execute(code)
+        dbg("execute", req_id, "mid", msg_id[:12])
+        idle_seen = False
+        while not idle_seen:
+            try:
+                msg = self.kc.get_iopub_msg(timeout=300)
+            except queue.Empty:
+                if not self.is_alive():
+                    send({"i": req_id, "t": "error", "ename": "KernelError",
+                          "evalue": "kernel process died",
+                          "trace": "\x1b[91m内核进程已退出\x1b[0m"})
+                    send({"i": req_id, "t": "idle"})
+                    return
+                send({"i": req_id, "t": "notice", "text": "（仍在运行，已等待 300s…）"})
+                continue
+            mtype = msg["msg_type"]
+            parent = (msg.get("parent_header") or {}).get("msg_id")
+            dbg("iopub", mtype, "parent", (parent or "")[:12], "match", parent == msg_id)
+            if parent != msg_id:
+                continue
+            content = msg.get("content", {})
+            if mtype == "status":
+                if content.get("execution_state") == "idle":
+                    idle_seen = True
+            elif mtype == "execute_input":
+                send({"i": req_id, "t": "exec_input",
+                      "count": content.get("execution_count"),
+                      "code": content.get("code", "")})
+            elif mtype == "stream":
+                send({"i": req_id, "t": "stream",
+                      "name": content.get("name"),
+                      "text": content.get("text", "")})
+            elif mtype == "display_data":
+                self._emit_display(req_id, content.get("data") or {})
+            elif mtype == "execute_result":
+                data = content.get("data") or {}
+                send({"i": req_id, "t": "result",
+                      "count": content.get("execution_count"),
+                      "text": data.get("text/plain", "")})
+            elif mtype == "error":
+                tb = "\n".join(content.get("traceback") or [])
+                send({"i": req_id, "t": "error",
+                      "ename": content.get("ename"),
+                      "evalue": content.get("evalue"),
+                      "trace": tb})
+            elif mtype == "input_request":
+                # 第一版未做真 stdin 回填，自动返回空串避免内核挂起
+                send({"i": req_id, "t": "input",
+                      "prompt": content.get("prompt", "")})
+                self.kc.input("")
+        send({"i": req_id, "t": "idle"})
+
+    @staticmethod
+    def _emit_display(req_id, data):
+        png = data.get("image/png")
+        if png:
+            send({"i": req_id, "t": "display", "mime": "image/png", "data": png})
+            return
+        txt = data.get("text/plain")
+        if txt is not None:
+            send({"i": req_id, "t": "display", "mime": "text/plain", "data": txt})
+
+    def interrupt(self):
+        # 直接给 kernel 进程发 SIGINT：ipykernel 在消息处理期间把 SIGINT 换成
+        # default_int_handler（kernelbase.py pre_handler_hook），SIGINT 转成
+        # KeyboardInterrupt，iopub 返回 error（UI 显示红色 traceback）。
+        # （client.interrupt_kernel() 走 control channel，只中断子进程、不打断
+        #  主线程用户代码，故弃用。）
+        if not self.is_alive():
+            send({"t": "notice", "text": "内核未运行，无法中断"})
+            return
+        try:
+            dbg("sending SIGINT to", self.proc.pid)
+            os.kill(self.proc.pid, signal.SIGINT)
+        except Exception as e:
+            send({"t": "notice", "text": "interrupt failed: %s" % e})
+
+    def complete(self, req_id, code, cursor_pos):
+        try:
+            # 发请求后按 msg_id 配匹收 reply（跳过滞留的 execute_reply 等，
+            # 避免与 shell 通道上未消费消息错位）。
+            msg_id = self.kc.complete(code, cursor_pos)
+            reply = self.kc._recv_reply(msg_id, timeout=15)
+            content = reply.get("content", {})
+            # 剔除魔法命令候选（用户明确不需要 %/%% 开头项）
+            matches = [m for m in content.get("matches", []) if not m.startswith("%")]
+            send({"i": req_id, "t": "complete",
+                  "matches": matches,
+                  "start": content.get("cursor_start", cursor_pos),
+                  "end": content.get("cursor_end", cursor_pos)})
+        except Exception as e:
+            send({"i": req_id, "t": "notice", "text": "complete failed: %s" % e})
+
+
+def main():
+    host = KernelHost()
+    try:
+        host.start()
+    except Exception:
+        import traceback
+        send({"t": "launch_error",
+              "text": "%s\n请检查 ipythonConsoleDemo.pythonPath 配置的解释器已安装 ipykernel 与 jupyter_client"
+                      % traceback.format_exc()})
+        sys.exit(1)
+    atexit.register(host.shutdown)
+
+    cmd_q = queue.Queue()
+
+    def reader():
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                req = json.loads(line)
+            except Exception:
+                continue
+            if req.get("op") == "interrupt":
+                # 立即执行：主循环可能阻塞在 execute() 的 iopub 等待里，
+                # 走队列会排不上队，永远打断不了长任务。
+                host.interrupt()
+            else:
+                cmd_q.put(req)
+        cmd_q.put(None)
+    threading.Thread(target=reader, daemon=True).start()
+
+    while True:
+        req = cmd_q.get()
+        if req is None:
+            break
+        op = req.get("op")
+        try:
+            if op == "execute":
+                host.execute(req.get("i", 0), req.get("code", ""))
+            elif op == "interrupt":
+                host.interrupt()
+            elif op == "restart":
+                host.restart()
+                send({"t": "notice", "text": "kernel restarted"})
+            elif op == "complete":
+                host.complete(req.get("i", 0), req.get("code", ""), req.get("cursor_pos", 0))
+            elif op == "shutdown":
+                break
+        except Exception:
+            import traceback
+            send({"i": req.get("i", 0), "t": "error",
+                  "ename": "HostError", "evalue": str(sys.exc_info()[1]),
+                  "trace": traceback.format_exc()})
+
+    host.shutdown()
+
+
+if __name__ == "__main__":
+    main()
