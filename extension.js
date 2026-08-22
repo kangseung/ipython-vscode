@@ -36,6 +36,14 @@ function pythonPath() {
   if (fs.existsSync(conda)) return conda;
   return 'python3';
 }
+// 运行目录解析顺序：配置 workingDir > 当前打开的 workspace 文件夹 > 空（用管家默认）
+function resolveCwd() {
+  const cfg = vscode.workspace.getConfiguration('ipythonConsoleDemo').get('workingDir', '');
+  if (cfg) return cfg;
+  const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+  if (ws) return ws.uri.fsPath;
+  return '';
+}
 
 function notify(ev) {
   if (panel) {
@@ -55,10 +63,11 @@ function startKernel() {
   if (kernelProc && kernelProc.exitCode === null) return;
   reqCounter = 0;
   const py = pythonPath();
+  const cwd = resolveCwd();
   notify({ t: 'status', text: '正在启动 IPython kernel（' + py + '）…' });
   let proc;
   try {
-    proc = spawn(py, [path.join(__dirname, 'kernel_host.py')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    proc = spawn(py, [path.join(__dirname, 'kernel_host.py')], { stdio: ['pipe', 'pipe', 'pipe'], env: cwd ? Object.assign({}, process.env, { CWD: cwd }) : process.env });
   } catch (err) {
     notify({ t: 'launch_error', text: String(err) });
     return;
@@ -137,7 +146,7 @@ function stopKernel() {
 function restartKernel() {
   notify({ t: 'status', text: '正在重启内核…' });
   if (kernelProc && kernelProc.exitCode === null) {
-    sendProc({ op: 'restart' });
+    sendProc({ op: 'restart', cwd: resolveCwd() || undefined });
   } else {
     startKernel();
   }
@@ -217,6 +226,12 @@ function activate(context) {
       ensurePanel(true);
       if (!kernelProc) startKernel();
       sendProc({ op: 'execute', i: ++reqCounter, code: code });
+    }),
+    vscode.commands.registerCommand('ipyDemo.changeOpenKeybinding', () => {
+      vscode.commands.executeCommand('workbench.action.openKeybindings', 'ipyDemo.open');
+    }),
+    vscode.commands.registerCommand('ipyDemo.changeSendKeybinding', () => {
+      vscode.commands.executeCommand('workbench.action.openKeybindings', 'ipyDemo.sendSelection');
     })
   );
 }

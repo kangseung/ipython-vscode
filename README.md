@@ -48,6 +48,38 @@ code --extensionDevelopmentPath=<本目录绝对路径> --new-window
   `ipykernel` 与 `jupyter_client`；否则在设置中指定）
 - 设置项：`ipythonConsoleDemo.pythonPath`（留空=自动探测）
 
+## 自定义
+
+### 1. Python 解释器路径
+
+设置项 **`ipythonConsoleDemo.pythonPath`**（`Ctrl+,` → 搜 "ipython"）：
+
+- 填绝对路径，如 `/home/user/anaconda3/envs/myenv/bin/python`
+  （该环境需已装 `ipykernel` 与 `jupyter_client`：`pip install ipykernel jupyter_client`）
+- 留空 = 自动探测（`/opt/anaconda3/bin/python` → `python3`）
+- **改完点工具栏「重启内核」生效**
+
+### 2. IPython 运行目录
+
+设置项 **`ipythonConsoleDemo.workingDir`**：
+
+- 留空（默认）= **VS Code 当前打开的文件夹**（多根工作区取第一个）
+- 也可填固定绝对路径，如 `/home/jiangsheng/data`
+- **改完点工具栏「重启内核」生效**；切换 VS Code 打开的文件夹后同样重启一次
+- 内核横幅会显示当前运行目录；控制台里 `os.getcwd()` 可验证
+
+### 3. 快捷键
+
+两个命令在命令面板里搜 **"IPython Console: 更改快捷键"**：
+
+- **更改快捷键：打开控制台**（默认 `Ctrl+Alt+O`）
+- **更改快捷键：发送运行**（编辑器中发送选区/当前行，默认 `Shift+Enter`）
+
+点命令会跳到快捷键编辑界面，点绑定列、按下想要的组合键、回车即保存。
+（Linux 桌面下 `Ctrl+Alt+*` 组合可能被窗口管理器占用，建议换成
+`Ctrl+Alt+I`、`Alt+Shift+I` 或 `Ctrl+K Ctrl+I` 之类不冲突的组合。）
+
+
 ## 架构
 
 ```

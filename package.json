@@ -2,7 +2,7 @@
   "name": "ipy-console-demo",
   "displayName": "IPython Console Demo",
   "description": "qtconsole 手感的 IPython 控制台（真实 ipykernel）",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -13,7 +13,9 @@
   "activationEvents": [
     "onWebviewPanel:ipyConsoleDemo",
     "onCommand:ipyDemo.open",
-    "onCommand:ipyDemo.sendSelection"
+    "onCommand:ipyDemo.sendSelection",
+    "onCommand:ipyDemo.changeOpenKeybinding",
+    "onCommand:ipyDemo.changeSendKeybinding"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -23,7 +25,14 @@
         "ipythonConsoleDemo.pythonPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "内核解释器路径（需已安装 ipykernel 与 jupyter_client）。留空自动探测：`/opt/anaconda3/bin/python` → `python3`"
+          "markdownDescription": "**内核解释器路径**（需已安装 ipykernel 与 jupyter_client）。留空自动探测：`/opt/anaconda3/bin/python` → `python3`。修改后点工具栏「重启内核」生效。",
+          "scope": "machine"
+        },
+        "ipythonConsoleDemo.workingDir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**IPython 运行目录**（内核的当前工作目录）。留空 = 使用 VS Code 当前打开的文件夹；也可填绝对路径（如 `/home/jiangsheng/data`）。修改后点工具栏「重启内核」生效。",
+          "scope": "machine"
         }
       }
     },
@@ -37,6 +46,16 @@
       {
         "command": "ipyDemo.sendSelection",
         "title": "发送选中/当前行到 IPython 控制台",
+        "category": "IPython Console"
+      },
+      {
+        "command": "ipyDemo.changeOpenKeybinding",
+        "title": "更改快捷键：打开控制台",
+        "category": "IPython Console"
+      },
+      {
+        "command": "ipyDemo.changeSendKeybinding",
+        "title": "更改快捷键：发送运行（编辑器 Shift+Enter）",
         "category": "IPython Console"
       }
     ],

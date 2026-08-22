@@ -105,7 +105,10 @@ class KernelHost:
         except Exception:
             pass  # 无 matplotlib 时静默跳过
 
-    def restart(self):
+    def restart(self, cwd=None):
+        if cwd:
+            os.environ["CWD"] = cwd
+            os.chdir(cwd)
         self._shutdown_kernel()
         self.start()
 
@@ -249,6 +252,9 @@ class KernelHost:
 
 def main():
     host = KernelHost()
+    _cwd = os.environ.get("CWD", "")
+    if _cwd:
+        os.chdir(_cwd)   # 目录不存在时抛 FileNotFoundError → launch_error
     try:
         host.start()
     except Exception:
@@ -290,7 +296,7 @@ def main():
             elif op == "interrupt":
                 host.interrupt()
             elif op == "restart":
-                host.restart()
+                host.restart(req.get("cwd"))
                 send({"t": "notice", "text": "kernel restarted"})
             elif op == "complete":
                 host.complete(req.get("i", 0), req.get("code", ""), req.get("cursor_pos", 0))
