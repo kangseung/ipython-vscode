@@ -659,7 +659,7 @@ function ansiToHtml(text) {
   var connTimer = setTimeout(function () {
     addBanner('25 秒未收到内核响应。\n若按钮也无反应，此面板可能未被扩展接管（僵尸面板）：请点标签栏 × 关闭本面板，\n然后按 Ctrl+Alt+O 重新打开即可恢复。\n', 'banner-err');
   }, 25000);
-  addBanner('IPython Console · 前端 v1.1.0 · 正在连接 IPython kernel…');
+  addBanner('IPython Console · 前端 v1.1.1 · 正在连接 IPython kernel…');
   // 扩展未激活时首次 connect 会丢失（窗口恢复场景），每 5 秒自动重发直到 hello
   function ensureConnect() {
     vscodeApi.postMessage({ type: 'connect' });
