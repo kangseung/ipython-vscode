@@ -67,8 +67,8 @@
   .exec { padding: 5px 8px 0 8px; white-space: pre-wrap; word-break: break-word; }
   /* 代码回显块与执行输出分层：输出前加细分隔线，避免输出紧贴代码末行 */
   .block > .exec + .out {
-    margin-top: 4px;
-    padding-top: 3px;
+    margin-top: 1.45em;   /* 虚线距上方代码约一个空行 */
+    padding-top: 4px;
     border-top: 1px dashed color-mix(in srgb, var(--console-fg, #000000) 22%, transparent);
   }
   .prompt { font-weight: 600; }
@@ -659,7 +659,7 @@ function ansiToHtml(text) {
   var connTimer = setTimeout(function () {
     addBanner('25 秒未收到内核响应。\n若按钮也无反应，此面板可能未被扩展接管（僵尸面板）：请点标签栏 × 关闭本面板，\n然后按 Ctrl+Alt+O 重新打开即可恢复。\n', 'banner-err');
   }, 25000);
-  addBanner('IPython Console · 前端 v1.1.1 · 正在连接 IPython kernel…');
+  addBanner('IPython Console · 前端 v1.1.2 · 正在连接 IPython kernel…');
   // 扩展未激活时首次 connect 会丢失（窗口恢复场景），每 5 秒自动重发直到 hello
   function ensureConnect() {
     vscodeApi.postMessage({ type: 'connect' });
