@@ -461,7 +461,8 @@ function ansiToHtml(text) {
         if (connTimer) { clearTimeout(connTimer); connTimer = null; }
         kernelReadyWeb = true;
         kernelBusy = false;
-        setStatus('ready', '就绪 · Python ' + ev.python);
+        nextIn = 1;
+        promptEl.textContent = 'In [' + nextIn + ']:';
         if (!cwdEdited) cwdInput.value = ev.cwd || '';
         kpythonEl.textContent = ev.python_path || '';
         kpythonEl.title = ev.python_path || '';
@@ -500,7 +501,7 @@ function ansiToHtml(text) {
         break;
       case 'exec_input':
         nextIn = ev.count + 1;
-        promptEl.textContent = 'In [*]:';
+        promptEl.textContent = 'In [' + nextIn + ']:';
         execEl(blockFor(ev.i), ev.count, ev.code);
         break;
       case 'stream':
