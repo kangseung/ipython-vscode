@@ -3,7 +3,7 @@
   "displayName": "IPython Console",
   "description": "qtconsole 手感的 IPython 控制台（真实 ipykernel）",
   "version": "1.1.2",
-  "publisher": "local",
+  "publisher": "jiangsheng",
   "engines": {
     "vscode": "^1.85.0"
   },
