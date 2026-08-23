@@ -62,7 +62,7 @@
   }
   #runmode:focus { border-color: var(--vscode-focusBorder, #007fd4); }
   button:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
-  #output { flex: 1 1 auto; overflow-y: auto; padding: 4px 0 12px; line-height: 1.45; }
+  #output { flex: 1 1 auto; overflow-y: auto; padding: 4px 0 0; line-height: 1.45; }
   .block { margin: 0; }
   .exec { padding: 5px 8px 0 8px; white-space: pre-wrap; word-break: break-word; }
   .prompt { font-weight: 600; }
@@ -144,11 +144,12 @@
       <span id="kpython" title=""></span>
     </div>
   </div>
-  <div id="output"></div>
-  <div id="inputbar">
-    <span id="prompt">In [*]:</span>
-    <textarea id="input" rows="1" spellcheck="false" placeholder="回车执行 · Tab/自动补全 · ↑↓历史 · 无选区Ctrl+C中断 · Shift+Enter 换行 · Ctrl+L 清屏"></textarea>
-    <div id="completions"></div>
+  <div id="output">
+    <div id="inputbar">
+      <span id="prompt">In [*]:</span>
+      <textarea id="input" rows="1" spellcheck="false" placeholder="回车执行 · Tab/自动补全 · ↑↓历史 · 无选区Ctrl+C中断 · Shift+Enter 换行 · Ctrl+L 清屏"></textarea>
+      <div id="completions"></div>
+    </div>
   </div>
 
 <script id="pure" nonce="{{nonce}}">
@@ -224,6 +225,7 @@ function ansiToHtml(text) {
   var vscodeApi = acquireVsCodeApi();
 
   var output = document.getElementById('output');
+  var inputbar = document.getElementById('inputbar');
   var inputEl = document.getElementById('input');
   var promptEl = document.getElementById('prompt');
   var dotEl = document.getElementById('dot');
@@ -275,7 +277,7 @@ function ansiToHtml(text) {
     var block = document.createElement('div');
     block.className = 'block';
     block.innerHTML = '<pre class="banner' + (cls ? ' ' + cls : '') + '">' + esc(text) + '</pre>';
-    output.appendChild(block);
+    output.insertBefore(block, inputbar);
     trimNode(output);
     maybeScroll();
     return block;
@@ -288,7 +290,7 @@ function ansiToHtml(text) {
       var out = document.createElement('div');
       out.className = 'out';
       el.appendChild(out);
-      output.appendChild(el);
+      output.insertBefore(el, inputbar);
       trimNode(output);
       blocks.set(req, el);
       maybeScroll();
@@ -551,6 +553,7 @@ function ansiToHtml(text) {
 
   function clearScreen() {
     output.innerHTML = '';
+    output.appendChild(inputbar);
     blocks.clear();
     addBanner('已清屏（In 序号保留，与 qtconsole %clear 一致）· Ctrl+L 同效\n');
   }
