@@ -19,6 +19,7 @@
     "onCommand:ipy.changeSendKeybinding"
   ],
   "main": "./extension.js",
+  "icon": "media/icon.png",
   "contributes": {
     "configuration": {
       "title": "IPython Console",
