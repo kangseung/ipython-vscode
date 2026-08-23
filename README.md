@@ -105,6 +105,19 @@ code --extensionDevelopmentPath=<本目录绝对路径> --new-window
 （Linux 桌面下 `Ctrl+Alt+*` 组合可能被窗口管理器占用，建议换成
 `Ctrl+Alt+I`、`Alt+Shift+I` 或 `Ctrl+K Ctrl+I` 之类不冲突的组合。）
 
+### 5. 输出区配色
+
+默认白底黑字（qtconsole 风格），也可在设置中改成任意颜色，**改色即时生效，无需重启内核**：
+
+- `ipythonConsole.outputBackground`（默认 `#ffffff`）背景色
+- `ipythonConsole.outputForeground`（默认 `#000000`）前景色（代码/stdout/结果）
+- `ipythonConsole.outputPromptIn`（默认 `#0a7a4f`）/ `outputPromptOut`（默认 `#0a47a0`）提示符
+- `ipythonConsole.outputStderr`（默认 `#a1260d`）错误/traceback
+- `ipythonConsole.outputMuted`（默认 `#606060`）次级说明文字
+
+> 注意：ANSI 彩色 traceback 的配色（红/橙/蓝）按默认白底优化；改成深色背景时
+> 建议同步把 `outputForeground` 调浅、`outputStderr` 调亮，可获得最佳可读性。
+
 
 ## 架构
 

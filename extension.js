@@ -197,6 +197,23 @@ function runMode() {
   return vscode.workspace.getConfiguration('ipythonConsole').get('runMode', 'append') === 'fresh' ? 'fresh' : 'append';
 }
 
+// 输出区配色（白底 qtconsole 风格，可在设置中改色）
+function outputColors() {
+  const cfg = vscode.workspace.getConfiguration('ipythonConsole');
+  return {
+    background: cfg.get('outputBackground', '#ffffff'),
+    foreground: cfg.get('outputForeground', '#000000'),
+    promptIn: cfg.get('outputPromptIn', '#0a7a4f'),
+    promptOut: cfg.get('outputPromptOut', '#0a47a0'),
+    stderr: cfg.get('outputStderr', '#a1260d'),
+    muted: cfg.get('outputMuted', '#606060')
+  };
+}
+function pushColors() {
+  const c = outputColors();
+  notify({ t: 'colors', ...c });
+}
+
 // UI 下拉切换执行模式（写入机器级设置，settings.json 可见）
 function applyRunMode(mode) {
   const m = mode === 'fresh' ? 'fresh' : 'append';
@@ -244,6 +261,7 @@ function ensurePanel(preserveFocus) {
       case 'connect':
         startKernel();
         notify({ t: 'runMode', mode: runMode() });
+        pushColors();
         break;
       case 'execute': sendProc({ op: 'execute', i: ++reqCounter, code: msg.code }); break;
       case 'complete': sendProc({ op: 'complete', i: ++reqCounter, code: msg.code, cursor_pos: msg.cursorPos }); break;
@@ -262,6 +280,7 @@ function ensurePanel(preserveFocus) {
   }, null, extContext.subscriptions);
   pinEditorTab();
   startKernel();
+  pushColors();
 }
 
 // 运行当前文件：整个文件内容送进内核（未保存也可运行，流式输出到控制台）
@@ -288,6 +307,9 @@ function activate(context) {
   extContext = context;
   uiCwd = extContext.workspaceState.get('ipythonConsoleCwd', '') || '';   // 恢复上次 UI 指定目录（空=默认）
   context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('ipythonConsole')) pushColors();
+    }),
     vscode.commands.registerCommand('ipy.open', () => {
       ensurePanel(false);
     }),

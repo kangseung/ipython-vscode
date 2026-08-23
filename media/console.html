@@ -104,17 +104,17 @@
   }
   .ci { padding: 2px 8px; cursor: pointer; white-space: pre; }
   .ci.sel { background: var(--vscode-list-hoverBackground, #2a2d2e); }
-  /* ---- 固定白底输出区（不跟随 VS Code 主题，qtconsole 风格）---- */
-  #output { background: #ffffff; color: #000000; }
-  #output .code { color: #000000; }
-  #output .prompt-in { color: #0a7a4f; }
-  #output .prompt-out { color: #0a47a0; }
-  #output .stream-stdout { color: #000000; }
-  #output .stream-stderr { color: #a1260d; }
-  #output .outval { color: #000000; }
-  #output .banner { color: #606060; }
-  #output .banner-err { color: #a1260d; }
-  #output .trunc { color: #888888; }
+  /* ---- 输出区配色（默认白底 qtconsole 风格，可用 ipythonConsole.output* 配置）---- */
+  #output { background: var(--console-bg, #ffffff); color: var(--console-fg, #000000); }
+  #output .code { color: var(--console-fg, #000000); }
+  #output .prompt-in { color: var(--console-prompt-in, #0a7a4f); }
+  #output .prompt-out { color: var(--console-prompt-out, #0a47a0); }
+  #output .stream-stdout { color: var(--console-fg, #000000); }
+  #output .stream-stderr { color: var(--console-stderr, #a1260d); }
+  #output .outval { color: var(--console-fg, #000000); }
+  #output .banner { color: var(--console-muted, #606060); }
+  #output .banner-err { color: var(--console-stderr, #a1260d); }
+  #output .trunc { color: var(--console-muted, #888888); }
 </style>
 </head>
 <body>
@@ -471,6 +471,14 @@ function ansiToHtml(text) {
       case 'runMode':
         if (ev.mode === 'fresh') runmodeEl.value = 'fresh';
         else runmodeEl.value = 'append';
+        break;
+      case 'colors':
+        document.documentElement.style.setProperty('--console-bg', ev.background || '#ffffff');
+        document.documentElement.style.setProperty('--console-fg', ev.foreground || '#000000');
+        document.documentElement.style.setProperty('--console-prompt-in', ev.promptIn || '#0a7a4f');
+        document.documentElement.style.setProperty('--console-prompt-out', ev.promptOut || '#0a47a0');
+        document.documentElement.style.setProperty('--console-stderr', ev.stderr || '#a1260d');
+        document.documentElement.style.setProperty('--console-muted', ev.muted || '#606060');
         break;
       case 'cwd_picked':
         cwdInput.value = ev.cwd || '';

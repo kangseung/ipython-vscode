@@ -44,6 +44,48 @@
           "default": "append",
           "markdownDescription": "**播放键（运行当前文件）的执行模式**：`append` = 接着跑（默认，保留变量与 import 缓存，直接注入当前内核）；`fresh` = 从头跑（每次播放前重启内核，重置所有变量并重新加载 import）。也可在控制台工具栏「运行」下拉框切换。",
           "scope": "machine"
+        },
+        "ipythonConsole.outputBackground": {
+          "type": "string",
+          "format": "color-hex",
+          "default": "#ffffff",
+          "markdownDescription": "**输出区背景色**（默认白底 qtconsole 风格）。改颜色即时生效，无需重启内核。",
+          "scope": "machine"
+        },
+        "ipythonConsole.outputForeground": {
+          "type": "string",
+          "format": "color-hex",
+          "default": "#000000",
+          "markdownDescription": "**输出区前景色**（代码、stdout、结果文字）。",
+          "scope": "machine"
+        },
+        "ipythonConsole.outputPromptIn": {
+          "type": "string",
+          "format": "color-hex",
+          "default": "#0a7a4f",
+          "markdownDescription": "**In 提示符颜色**。",
+          "scope": "machine"
+        },
+        "ipythonConsole.outputPromptOut": {
+          "type": "string",
+          "format": "color-hex",
+          "default": "#0a47a0",
+          "markdownDescription": "**Out 提示符颜色**。",
+          "scope": "machine"
+        },
+        "ipythonConsole.outputStderr": {
+          "type": "string",
+          "format": "color-hex",
+          "default": "#a1260d",
+          "markdownDescription": "**stderr / traceback / 错误横幅颜色**。",
+          "scope": "machine"
+        },
+        "ipythonConsole.outputMuted": {
+          "type": "string",
+          "format": "color-hex",
+          "default": "#606060",
+          "markdownDescription": "**次级说明文字颜色**（banner 提示、截断标记）。",
+          "scope": "machine"
         }
       }
     },
