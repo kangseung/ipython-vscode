@@ -61,7 +61,7 @@ class KernelHost:
         self.proc = None
         self.kc = None
         self.cf = None
-
+        self._start_cwd = os.getcwd()   # 扩展 spawn 时的目录（CWD 为空时的默认）
     # ---- 生命周期 ----
     def start(self):
         fd, self.cf = tempfile.mkstemp(prefix="ipyhost-", suffix=".json")
@@ -106,9 +106,17 @@ class KernelHost:
             pass  # 无 matplotlib 时静默跳过
 
     def restart(self, cwd=None):
-        if cwd:
-            os.environ["CWD"] = cwd
-            os.chdir(cwd)
+        # cwd 为空串/None = 恢复默认（启动时目录，即跟随 VS Code 文件夹）。
+        # 校验与 chdir 放在杀内核之前：目录无效时内核保持原样运行，错误由主循环上报。
+        target = (cwd or "").strip()
+        if target:
+            if not os.path.isdir(target):
+                raise FileNotFoundError("运行目录不是文件夹或不存在: %s" % target)
+            os.environ["CWD"] = target
+            os.chdir(target)
+        else:
+            os.environ["CWD"] = ""
+            os.chdir(self._start_cwd)
         self._shutdown_kernel()
         self.start()
 
@@ -149,6 +157,7 @@ class KernelHost:
         send({
             "t": "hello",
             "python": sys.version.split()[0],
+            "python_path": sys.executable,
             "ipykernel": iv,
             "cwd": os.getcwd(),
         })
@@ -252,15 +261,15 @@ class KernelHost:
 
 def main():
     host = KernelHost()
-    _cwd = os.environ.get("CWD", "")
-    if _cwd:
-        os.chdir(_cwd)   # 目录不存在时抛 FileNotFoundError → launch_error
     try:
+        _cwd = os.environ.get("CWD", "")
+        if _cwd:
+            os.chdir(_cwd)   # 目录不存在时抛 FileNotFoundError → launch_error
         host.start()
     except Exception:
         import traceback
         send({"t": "launch_error",
-              "text": "%s\n请检查 ipythonConsoleDemo.pythonPath 配置的解释器已安装 ipykernel 与 jupyter_client"
+              "text": "%s\n请检查 ipythonConsole.pythonPath 配置的解释器已安装 ipykernel 与 jupyter_client"
                       % traceback.format_exc()})
         sys.exit(1)
     atexit.register(host.shutdown)

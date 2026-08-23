@@ -1,8 +1,8 @@
 {
-  "name": "ipy-console-demo",
-  "displayName": "IPython Console Demo",
+  "name": "ipython-vscode",
+  "displayName": "IPython Console",
   "description": "qtconsole 手感的 IPython 控制台（真实 ipykernel）",
-  "version": "0.2.3",
+  "version": "1.0.0",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"
@@ -11,50 +11,67 @@
     "Other"
   ],
   "activationEvents": [
-    "onWebviewPanel:ipyConsoleDemo",
-    "onCommand:ipyDemo.open",
-    "onCommand:ipyDemo.sendSelection",
-    "onCommand:ipyDemo.changeOpenKeybinding",
-    "onCommand:ipyDemo.changeSendKeybinding"
+    "onWebviewPanel:ipythonConsole",
+    "onCommand:ipy.open",
+    "onCommand:ipy.runFile",
+    "onCommand:ipy.sendSelection",
+    "onCommand:ipy.changeOpenKeybinding",
+    "onCommand:ipy.changeSendKeybinding"
   ],
   "main": "./extension.js",
   "contributes": {
     "configuration": {
-      "title": "IPython Console Demo",
+      "title": "IPython Console",
       "properties": {
-        "ipythonConsoleDemo.pythonPath": {
+        "ipythonConsole.pythonPath": {
           "type": "string",
           "default": "",
           "markdownDescription": "**内核解释器路径**（需已安装 ipykernel 与 jupyter_client）。留空自动探测：`/opt/anaconda3/bin/python` → `python3`。修改后点工具栏「重启内核」生效。",
           "scope": "machine"
         },
-        "ipythonConsoleDemo.workingDir": {
+        "ipythonConsole.workingDir": {
           "type": "string",
           "default": "",
           "markdownDescription": "**IPython 运行目录**（内核的当前工作目录）。留空 = 使用 VS Code 当前打开的文件夹；也可填绝对路径（如 `/home/jiangsheng/data`）。修改后点工具栏「重启内核」生效。",
+          "scope": "machine"
+        },
+        "ipythonConsole.runMode": {
+          "type": "string",
+          "enum": [
+            "append",
+            "fresh"
+          ],
+          "default": "append",
+          "markdownDescription": "**播放键（运行当前文件）的执行模式**：`append` = 接着跑（默认，保留变量与 import 缓存，直接注入当前内核）；`fresh` = 从头跑（每次播放前重启内核，重置所有变量并重新加载 import）。也可在控制台工具栏「运行」下拉框切换。",
           "scope": "machine"
         }
       }
     },
     "commands": [
       {
-        "command": "ipyDemo.open",
+        "command": "ipy.open",
         "title": "打开 IPython 控制台",
         "category": "IPython Console",
-        "icon": "media/ipython.svg"
+        "icon": "media/console.svg"
       },
       {
-        "command": "ipyDemo.sendSelection",
+        "command": "ipy.runFile",
+        "title": "运行当前文件到 IPython 控制台",
+        "category": "IPython Console",
+        "icon": "media/play.svg"
+      },
+      {
+        "command": "ipy.sendSelection",
         "title": "发送选中/当前行到 IPython 控制台",
         "category": "IPython Console"
       },
       {
-        "command": "ipyDemo.changeOpenKeybinding",
+        "command": "ipy.changeOpenKeybinding",
         "title": "更改快捷键：打开控制台",
         "category": "IPython Console"
       },
       {
-        "command": "ipyDemo.changeSendKeybinding",
+        "command": "ipy.changeSendKeybinding",
         "title": "更改快捷键：发送运行（编辑器 Shift+Enter）",
         "category": "IPython Console"
       }
@@ -62,24 +79,30 @@
     "menus": {
       "editor/title": [
         {
-          "command": "ipyDemo.open",
-          "group": "navigation"
+          "command": "ipy.open",
+          "group": "navigation",
+          "icon": "media/console.svg"
+        },
+        {
+          "command": "ipy.runFile",
+          "group": "navigation",
+          "icon": "media/play.svg"
         }
       ],
       "editor/context": [
         {
-          "command": "ipyDemo.sendSelection",
+          "command": "ipy.sendSelection",
           "group": "navigation@1"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "ipyDemo.open",
+        "command": "ipy.open",
         "key": "ctrl+alt+o"
       },
       {
-        "command": "ipyDemo.sendSelection",
+        "command": "ipy.sendSelection",
         "key": "shift+enter",
         "when": "editorTextFocus && !suggestWidgetVisible && !findWidgetVisible && !terminalFocus && !notebookEditorFocused && !inSnippetMode"
       }

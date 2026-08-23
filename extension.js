@@ -11,6 +11,8 @@ let kernelBuf = '';
 let reqCounter = 0;
 let kernelReady = false;
 let extContext = undefined;
+let uiCwd = '';               // UI 指定运行目录（空串 = 跟随 VS Code 文件夹/设置项）
+let pendingRun = undefined;   // 内核就绪前的待执行代码（启动竞态不丢请求）
 
 function randomNonce() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -30,15 +32,17 @@ function getHtml(webview) {
 
 // 解释器解析顺序：配置 > /opt/anaconda3/bin/python > python3
 function pythonPath() {
-  const cfg = vscode.workspace.getConfiguration('ipythonConsoleDemo').get('pythonPath', '');
+  const cfg = vscode.workspace.getConfiguration('ipythonConsole').get('pythonPath', '');
   if (cfg && fs.existsSync(cfg)) return cfg;
   const conda = '/opt/anaconda3/bin/python';
   if (fs.existsSync(conda)) return conda;
   return 'python3';
 }
-// 运行目录解析顺序：配置 workingDir > 当前打开的 workspace 文件夹 > 空（用管家默认）
+// 运行目录解析顺序：UI 指定 > 设置项 workingDir > 当前打开的 workspace 文件夹 > 空（用管家默认）
 function resolveCwd() {
-  const cfg = vscode.workspace.getConfiguration('ipythonConsoleDemo').get('workingDir', '');
+  const ui = uiCwd && uiCwd.trim();
+  if (ui) return ui;
+  const cfg = vscode.workspace.getConfiguration('ipythonConsole').get('workingDir', '');
   if (cfg) return cfg;
   const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
   if (ws) return ws.uri.fsPath;
@@ -91,7 +95,14 @@ function startKernel() {
       if (!line) continue;
       let ev;
       try { ev = JSON.parse(line); } catch (e) { continue; }
-      if (ev.t === 'hello') kernelReady = true;
+      if (ev.t === 'hello') {
+        kernelReady = true;
+        if (pendingRun) {
+          const code = pendingRun;
+          pendingRun = undefined;
+          sendProc({ op: 'execute', i: ++reqCounter, code: code });
+        }
+      }
       notify(ev);
     }
   });
@@ -133,6 +144,7 @@ function stopKernel() {
   const proc = kernelProc;
   kernelProc = undefined;
   kernelReady = false;
+  pendingRun = undefined;   // 丢弃未就绪时暂存的代码
   if (proc.exitCode === null) {
     try { proc.stdin.write(JSON.stringify({ op: 'shutdown' }) + '\n'); } catch (e) { /* 无关 */ }
     setTimeout(() => {
@@ -146,12 +158,52 @@ function stopKernel() {
 function restartKernel() {
   notify({ t: 'status', text: '正在重启内核…' });
   if (kernelProc && kernelProc.exitCode === null) {
-    sendProc({ op: 'restart', cwd: resolveCwd() || undefined });
+    // 始终携带 resolveCwd()：空串 = 让管家恢复启动时目录（默认跟随 VS Code 文件夹）
+    sendProc({ op: 'restart', cwd: resolveCwd() });
   } else {
     startKernel();
   }
 }
 
+// UI 设置运行目录（工具栏输入框/浏览选择 →「应用」）。空串 = 恢复默认。
+function applyCwd(value) {
+  const v = (value || '').trim();
+  if (v && (!fs.existsSync(v) || !fs.statSync(v).isDirectory())) {
+    notify({ t: 'notice', text: '运行目录不存在或不是文件夹：' + v + '（未应用，仍使用原目录 ' + resolveCwd() + '）' });
+    return;
+  }
+  uiCwd = v;
+  extContext.workspaceState.update('ipythonConsoleCwd', v);
+  restartKernel();
+  notify({ t: 'notice', text: v
+    ? '运行目录已设为：' + v + '（正在重启内核生效）'
+    : '运行目录已恢复默认：跟随 VS Code 当前文件夹（正在重启内核生效）' });
+}
+
+// 原生文件夹选择器：选中后回填输入框（不自动应用，避免误触重启丢变量）
+function pickCwd() {
+  vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: '选择 IPython 运行目录'
+  }).then((uris) => {
+    if (uris && uris.length) notify({ t: 'cwd_picked', cwd: uris[0].fsPath });
+  }, () => { /* 取消 */ });
+}
+
+// 播放键执行模式：append=接着跑（默认，直接注入当前内核）；fresh=从头跑（先重启内核）
+function runMode() {
+  return vscode.workspace.getConfiguration('ipythonConsole').get('runMode', 'append') === 'fresh' ? 'fresh' : 'append';
+}
+
+// UI 下拉切换执行模式（写入机器级设置，settings.json 可见）
+function applyRunMode(mode) {
+  const m = mode === 'fresh' ? 'fresh' : 'append';
+  vscode.workspace.getConfiguration('ipythonConsole').update('runMode', m, vscode.ConfigurationTarget.Global);
+  notify({ t: 'runMode', mode: m });
+  notify({ t: 'notice', text: '运行模式：' + (m === 'fresh' ? '从头跑（播放前重置内核）' : '接着跑（保留变量/import 缓存）') });
+}
 // 退出确认（原生模态弹窗）。tab 上的 × 无法被扩展拦截，此为受控退出路径。
 function quitWithConfirm() {
   if (!panel) return;
@@ -176,7 +228,7 @@ function ensurePanel(preserveFocus) {
     return;
   }
   panel = vscode.window.createWebviewPanel(
-    'ipyConsoleDemo',
+    'ipythonConsole',
     'IPython Console',
     preserveFocus
       ? { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }
@@ -189,11 +241,17 @@ function ensurePanel(preserveFocus) {
   panel.webview.html = getHtml(panel.webview);
   panel.webview.onDidReceiveMessage((msg) => {
     switch (msg.type) {
-      case 'connect': startKernel(); break;
+      case 'connect':
+        startKernel();
+        notify({ t: 'runMode', mode: runMode() });
+        break;
       case 'execute': sendProc({ op: 'execute', i: ++reqCounter, code: msg.code }); break;
       case 'complete': sendProc({ op: 'complete', i: ++reqCounter, code: msg.code, cursor_pos: msg.cursorPos }); break;
       case 'interrupt': sendProc({ op: 'interrupt' }); break;
       case 'restart': restartKernel(); break;
+      case 'runMode': applyRunMode(msg.mode); break;
+      case 'cwd': applyCwd(msg.cwd); break;
+      case 'pickCwd': pickCwd(); break;
       case 'quit': quitWithConfirm(); break;
       default: break;
     }
@@ -206,13 +264,37 @@ function ensurePanel(preserveFocus) {
   startKernel();
 }
 
+// 运行当前文件：整个文件内容送进内核（未保存也可运行，流式输出到控制台）
+function runCurrentFile() {
+  const ed = vscode.window.activeTextEditor;
+  if (!ed) return;
+  const code = ed.document.getText();
+  if (!code.trim()) return;
+  ensurePanel(false);            // 面板带到前台：已打开时也切过去，运行结果立即可见
+  if (!kernelProc) startKernel();
+  if (runMode() === 'fresh') {
+    // 从头跑：先重启内核（重置变量、重新加载 import），hello 后就绪后自动补发文件
+    pendingRun = code;
+    restartKernel();
+    return;
+  }
+  if (!kernelReady) {
+    pendingRun = code;           // 内核启动中：暂存，hello 后自动补发
+    return;
+  }
+  sendProc({ op: 'execute', i: ++reqCounter, code: code });
+}
 function activate(context) {
   extContext = context;
+  uiCwd = extContext.workspaceState.get('ipythonConsoleCwd', '') || '';   // 恢复上次 UI 指定目录（空=默认）
   context.subscriptions.push(
-    vscode.commands.registerCommand('ipyDemo.open', () => {
+    vscode.commands.registerCommand('ipy.open', () => {
       ensurePanel(false);
     }),
-    vscode.commands.registerCommand('ipyDemo.sendSelection', () => {
+    vscode.commands.registerCommand('ipy.runFile', () => {
+      runCurrentFile();
+    }),
+    vscode.commands.registerCommand('ipy.sendSelection', () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed) return;
       const sel = ed.selection;
@@ -227,11 +309,11 @@ function activate(context) {
       if (!kernelProc) startKernel();
       sendProc({ op: 'execute', i: ++reqCounter, code: code });
     }),
-    vscode.commands.registerCommand('ipyDemo.changeOpenKeybinding', () => {
-      vscode.commands.executeCommand('workbench.action.openKeybindings', 'ipyDemo.open');
+    vscode.commands.registerCommand('ipy.changeOpenKeybinding', () => {
+      vscode.commands.executeCommand('workbench.action.openKeybindings', 'ipy.open');
     }),
-    vscode.commands.registerCommand('ipyDemo.changeSendKeybinding', () => {
-      vscode.commands.executeCommand('workbench.action.openKeybindings', 'ipyDemo.sendSelection');
+    vscode.commands.registerCommand('ipy.changeSendKeybinding', () => {
+      vscode.commands.executeCommand('workbench.action.openKeybindings', 'ipy.sendSelection');
     })
   );
 }
@@ -240,7 +322,7 @@ function activate(context) {
 function pinEditorTab() {
   setTimeout(() => {
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
-    if (!tab || !tab.input || !(tab.input.viewType === 'ipyConsoleDemo')) {
+    if (!tab || !tab.input || !(tab.input.viewType === 'ipythonConsole')) {
       return;
     }
     vscode.commands.executeCommand('workbench.action.pinEditor').then(undefined, () => {});
