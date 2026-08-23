@@ -168,6 +168,10 @@ function restartKernel() {
 // UI 设置运行目录（工具栏输入框/浏览选择 →「应用」）。空串 = 恢复默认。
 function applyCwd(value) {
   const v = (value || '').trim();
+  if (v && !path.isAbsolute(v)) {
+    notify({ t: 'notice', text: '运行目录需为绝对路径：' + v + '（未应用，仍使用原目录 ' + resolveCwd() + '）' });
+    return;
+  }
   if (v && (!fs.existsSync(v) || !fs.statSync(v).isDirectory())) {
     notify({ t: 'notice', text: '运行目录不存在或不是文件夹：' + v + '（未应用，仍使用原目录 ' + resolveCwd() + '）' });
     return;
@@ -290,15 +294,15 @@ function runCurrentFile() {
   const code = ed.document.getText();
   if (!code.trim()) return;
   ensurePanel(false);            // 面板带到前台：已打开时也切过去，运行结果立即可见
-  if (!kernelProc) startKernel();
-  if (runMode() === 'fresh') {
-    // 从头跑：先重启内核（重置变量、重新加载 import），hello 后就绪后自动补发文件
+  if (runMode() === 'fresh' && kernelProc && kernelReady) {
+    // 从头跑：内核已就绪 → 先重启（重置变量/重新加载 import），hello 后自动补发文件
     pendingRun = code;
     restartKernel();
     return;
   }
+  if (!kernelProc) startKernel();
   if (!kernelReady) {
-    pendingRun = code;           // 内核启动中：暂存，hello 后自动补发
+    pendingRun = code;           // 内核启动中/未启动（新内核天然 fresh）：hello 后自动补发
     return;
   }
   sendProc({ op: 'execute', i: ++reqCounter, code: code });
