@@ -23,7 +23,7 @@ DataFrame 文字表格、matplotlib 内嵌图、补全、历史、一键运行�
 
 | 设置 | 默认 | 说明 |
 |---|---|---|
-| `ipythonConsole.pythonPath` | 自动探测 | 内核解释器(需已装 `ipykernel` 与 `jupyter_client`);改后重启内核 |
+| `ipythonConsole.pythonPath` | 自动探测 | 内核解释器(需已装 `ipykernel` 与 `jupyter_client`;留空自动探测,Windows 下排除微软商店存根,建议填 `python.exe` 绝对路径);改后重启内核 |
 | `ipythonConsole.workingDir` | VS Code 当前文件夹 | IPython 运行目录;改后重启内核 |
 | `ipythonConsole.runMode` | `append` | 播放键:`append` 接着跑 / `fresh` 从头跑 |
 | `ipythonConsole.outputBackground` | `#ffffff` | 输出区背景色 |
@@ -34,6 +34,8 @@ DataFrame 文字表格、matplotlib 内嵌图、补全、历史、一键运行�
 | `ipythonConsole.outputMuted` | `#606060` | 次级说明文字颜色 |
 
 颜色设置改后即时生效,无需重启内核。
+
+`ipythonConsole.pythonPath` 与 `ipythonConsole.workingDir` 可写在**用户设置**或**工作区 `.vscode/settings.json`**(两者都生效,工作区优先);修改后点工具栏「重启内核」生效。
 
 ## 快捷键(可自行更改)
 

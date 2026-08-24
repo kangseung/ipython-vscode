@@ -3,7 +3,8 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const os = require('os');
+const { spawn, exec, execFile } = require('child_process');
 
 let panel = undefined;
 let kernelProc = undefined;   // 当前管家进程
@@ -13,6 +14,7 @@ let kernelReady = false;
 let extContext = undefined;
 let uiCwd = '';               // UI 指定运行目录（空串 = 跟随 VS Code 文件夹/设置项）
 let pendingRun = undefined;   // 内核就绪前的待执行请求 {code, file}（启动竞态不丢请求）
+let kernelStarting = false;   // 异步探测解释器期间防重复启动（Windows 需 where 解析）
 
 function randomNonce() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -30,13 +32,81 @@ function getHtml(webview) {
   return html.replace(/\{\{nonce\}\}/g, nonce);
 }
 
-// 解释器解析顺序：配置 > /opt/anaconda3/bin/python > python3
-function pythonPath() {
-  const cfg = vscode.workspace.getConfiguration('ipythonConsole').get('pythonPath', '');
-  if (cfg && fs.existsSync(cfg)) return cfg;
-  const conda = '/opt/anaconda3/bin/python';
-  if (fs.existsSync(conda)) return conda;
-  return 'python3';
+// 解释器候选列表(分平台经典安装位置,按序探测)
+function interpreterCandidates() {
+  if (process.platform === 'win32') {
+    const home = os.homedir();
+    return [
+      'C:/Anaconda3/python.exe',
+      'C:/ProgramData/Anaconda3/python.exe',
+      path.join(home, 'anaconda3', 'python.exe'),
+      path.join(home, 'Anaconda3', 'python.exe'),
+      path.join(home, 'miniconda3', 'python.exe'),
+      path.join(home, 'Miniconda3', 'python.exe')
+    ];
+  }
+  return [
+    '/opt/anaconda3/bin/python',
+    '/usr/local/anaconda3/bin/python',
+    '/usr/local/bin/python3',
+    '/usr/bin/python3'
+  ];
+}
+
+// 校验解释器是否自带 ipykernel + jupyter_client(探测的关键判据;通过才候选)
+function probeIpykernel(py) {
+  return new Promise((resolve) => {
+    execFile(py, ['-c', 'import ipykernel, jupyter_client'], { timeout: 15000, windowsHide: true }, (err) => {
+      resolve(err ? 'import 校验失败(exit ' + (err.code === null ? err.signal : err.code) + ')' : '');
+    });
+  });
+}
+
+// Windows：用 where 把裸命令名解析成真实路径；微软商店存根（WindowsApps）视为无效
+function whereResolve(cmd) {
+  return new Promise((resolve) => {
+    exec('where ' + cmd, { encoding: 'utf8' }, (err, stdout) => {
+      if (err || !stdout) return resolve('');
+      // 取第一个真实存在的绝对路径，跳过 WindowsApps 商店存根
+      const real = stdout.split(/\r?\n/).map((s) => s.trim())
+        .find((s) => s && path.isAbsolute(s) && !/WindowsApps/i.test(s));
+      resolve(real || '');
+    });
+  });
+}
+
+// PATH 裸命令回退列表：Windows 先经 where 解析真实路径（存根已被过滤）
+async function pathCommands() {
+  if (process.platform !== 'win32') return ['python3', 'python'];
+  const out = [];
+  for (const cmd of ['python', 'python3']) {
+    const real = await whereResolve(cmd);
+    if (real) out.push(real);
+  }
+  return out;
+}
+
+// 最终解释器：配置(存在即信任) > 经典位置(逐个校验 ipykernel) > PATH 命令(逐个校验)
+// 全部失败时返回 {py:'', fails} 携带每个候选的失败原因，供报错指引用户配置
+async function resolvePython() {
+  const fails = [];
+  const cfg = vscode.workspace.getConfiguration('ipythonConsole').get('pythonPath', '').trim();
+  if (cfg) {
+    if (fs.existsSync(cfg)) return { py: cfg, fails };   // 用户显式配置：直接使用，错不在这里
+    fails.push('配置的 ' + cfg + ' 不存在');
+  }
+  for (const p of interpreterCandidates()) {
+    if (!fs.existsSync(p)) { fails.push(p + ' 不存在'); continue; }
+    const why = await probeIpykernel(p);
+    if (!why) return { py: p, fails };
+    fails.push(p + '：' + why);
+  }
+  for (const abs of await pathCommands()) {
+    const why = await probeIpykernel(abs);
+    if (!why) return { py: abs, fails };
+    fails.push(abs + '：' + why);
+  }
+  return { py: '', fails };
 }
 // 运行目录解析顺序：UI 指定 > 设置项 workingDir > 当前打开的 workspace 文件夹 > 空（用管家默认）
 function resolveCwd() {
@@ -63,10 +133,28 @@ function sendProc(payload) {
   kernelProc.stdin.write(JSON.stringify(payload) + '\n');
 }
 
-function startKernel() {
+async function startKernel() {
   if (kernelProc && kernelProc.exitCode === null) return;
+  if (kernelStarting) return;               // 避免异步探测解释器期间重复启动
+  kernelStarting = true;
+  let py = '';
+  let failDetail = [];
+  try {
+    const r = await resolvePython();        // 全候选探测 + ipykernel 校验
+    py = r.py;
+    failDetail = r.fails;
+  } finally {
+    kernelStarting = false;
+  }
+  if (!py) {
+    notify({ t: 'launch_error', text: '未找到可用的 Python 解释器（自动探测均失败）：\n'
+      + failDetail.join('\n')
+      + '\n\n请配置 ipythonConsole.pythonPath 指向含 ipykernel 与 jupyter_client 的解释器（python.exe 绝对路径，如 C:/Anaconda3/python.exe），改后点「重启内核」。' });
+    return;
+  }
+  if (kernelProc && kernelProc.exitCode === null) return;   // 探测期间已被启动
+  if (!panel) return;                                       // 探测期间面板已关闭，放弃启动
   reqCounter = 0;
-  const py = pythonPath();
   const cwd = resolveCwd();
   notify({ t: 'status', text: '正在启动 IPython kernel（' + py + '）…' });
   let proc;
@@ -123,7 +211,13 @@ function startKernel() {
     if (proc !== kernelProc) return;
     kernelProc = undefined;
     kernelReady = false;
-    notify({ t: 'launch_error', text: '管家进程启动失败：' + String(err) + '\n解释器：' + pythonPath() });
+    let text;
+    if (err && err.code === 'ENOENT') {
+      text = '解释器命令找不到（ENOENT）：' + py + '\n请检查 ipythonConsole.pythonPath 是否指向 python.exe 的绝对路径（不要写成 python3 这种裸命令名），且该解释器需已安装 ipykernel 与 jupyter_client。';
+    } else {
+      text = '管家进程启动失败：' + String(err) + '\n解释器：' + py;
+    }
+    notify({ t: 'launch_error', text: text });
   });
 
   proc.on('exit', (code) => {
@@ -131,7 +225,13 @@ function startKernel() {
     kernelProc = undefined;
     pendingRun = undefined;            // 与 stopKernel 对齐：启动失败/意外退出不留陈请求
     if (!kernelReady) {
-      notify({ t: 'launch_error', text: '管家进程启动失败（exit ' + code + '）\n解释器：' + pythonPath() + '\n请确认该解释器已安装 ipykernel 与 jupyter_client' });
+      let text;
+      if (code === 9009) {
+        text = '管家进程启动失败（exit 9009）：Windows 找不到该命令，命中的是微软商店 Python 存根（WindowsApps），且商店未安装 Python。\n解释器：' + py + '\n请配置 ipythonConsole.pythonPath 为 python.exe 的绝对路径（如 C:/Anaconda3/python.exe）。';
+      } else {
+        text = '管家进程启动失败（exit ' + code + '）\n解释器：' + py + '\n请确认该解释器已安装 ipykernel 与 jupyter_client';
+      }
+      notify({ t: 'launch_error', text: text });
     } else {
       kernelReady = false;
       notify({ t: 'status', text: '内核进程已退出（exit ' + code + '）' });
@@ -337,6 +437,10 @@ function activate(context) {
       if (!code.trim()) return;
       ensurePanel(true);
       if (!kernelProc) startKernel();
+      if (!kernelReady) {
+        pendingRun = { code: code, file: undefined };   // 内核启动中：hello 后自动补发（与 runCurrentFile 对齐）
+        return;
+      }
       sendProc({ op: 'execute', i: ++reqCounter, code: code });
     }),
     vscode.commands.registerCommand('ipy.changeOpenKeybinding', () => {
