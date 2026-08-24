@@ -23,6 +23,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import threading
 
 from jupyter_client import BlockingKernelClient
@@ -62,6 +63,7 @@ class KernelHost:
         self.kc = None
         self.cf = None
         self._start_cwd = os.getcwd()   # 扩展 spawn 时的目录（CWD 为空时的默认）
+        self._file_reqs = {}            # req_id -> 文件路径（「运行文件」执行的 exec_input 回显用）
     # ---- 生命周期 ----
     def start(self):
         fd, self.cf = tempfile.mkstemp(prefix="ipyhost-", suffix=".json")
@@ -162,23 +164,87 @@ class KernelHost:
             "cwd": os.getcwd(),
         })
 
-    # ---- 执行 ----
-    def execute(self, req_id, code):
+    @staticmethod
+    def _spyder_wrap(code, filename):
+        # 复刻 Spyder runfile 语义（namespace_manager + code_runner）：
+        # 新建 __main__ 模块作为执行命名空间，exec 整个命名空间合并回 console。
+        # 与 IPython %run 同源机制，但不依赖 spyder_kernels 包。
+        # 效果：__file__/__name__/__package__/sys.argv 齐全，变量留 console，
+        # 报错 traceback 定位真实文件与精确行号。
+        # 先经 IPython 输入转换（与 cell 执行同一管道）：文件内 % 魔法、! 可用。
+        try:
+            from IPython.core.inputtransformer2 import TransformerManager
+            code = TransformerManager().transform_cell(code)
+        except Exception:
+            pass
+        import json as _json
+        code_lit = _json.dumps(code, ensure_ascii=False)
+        file_lit = _json.dumps(filename, ensure_ascii=False)
+        return (
+            "def __ipy_run(__ipy_code, __ipy_fn):\n"
+            "    __tracebackhide__ = True\n"
+            "    import types as __t\n"
+            "    import sys as __s\n"
+            "    ns = __t.ModuleType('__main__', doc='Module created for script run in IPython')\n"
+            "    ns.__file__ = __ipy_fn\n"
+            "    ns.__package__ = None\n"
+            "    ns.__spec__ = None\n"
+            "    ns.__nonzero__ = lambda: True\n"
+            "    __saved = __s.argv\n"
+            "    __s.argv = [__ipy_fn]\n"
+            "    try:\n"
+            "        exec(compile(__ipy_code, __ipy_fn, 'exec'), ns.__dict__)\n"
+            "    finally:\n"
+            "        __s.argv = __saved\n"
+            "        ns.__dict__.pop('__file__', None)\n"
+            "        try:\n"
+            "            __user = get_ipython().user_ns\n"
+            "            for __k, __v in ns.__dict__.items():\n"
+            "                if not __k.startswith('__'):\n"
+            "                    __user[__k] = __v\n"
+            "        except Exception:\n"
+            "            pass\n"
+            "try:\n"
+            "    __ipy_run(%s, %s)\n"
+            "finally:\n"
+            "    del __ipy_run\n" % (code_lit, file_lit)
+        )
+
+    def execute(self, req_id, code, file=None):
+        # file 存在 = 「运行文件」：走 Spyder 等价执行（__file__ 等可用）
+        if file is not None:
+            code = self._spyder_wrap(code, file)
+            self._file_reqs[req_id] = file
         send({"i": req_id, "t": "busy"})
         msg_id = self.kc.execute(code)
         dbg("execute", req_id, "mid", msg_id[:12])
         idle_seen = False
+        last_notice = time.monotonic()
         while not idle_seen:
             try:
-                msg = self.kc.get_iopub_msg(timeout=300)
+                msg = self.kc.get_iopub_msg(timeout=0.5)
+                last_notice = time.monotonic()
             except queue.Empty:
-                if not self.is_alive():
-                    send({"i": req_id, "t": "error", "ename": "KernelError",
-                          "evalue": "kernel process died",
-                          "trace": "\x1b[91m内核进程已退出\x1b[0m"})
-                    send({"i": req_id, "t": "idle"})
-                    return
-                send({"i": req_id, "t": "notice", "text": "（仍在运行，已等待 300s…）"})
+                # input() 等请求走 stdin 通道，iopub 上不可见：轮询 stdin，
+                # 收到 input_request 即回空串，防内核挂起（AGENTS.md 承诺行为）。
+                try:
+                    sm = self.kc.get_stdin_msg(timeout=0.05)
+                except queue.Empty:
+                    if not self.is_alive():
+                        send({"i": req_id, "t": "error", "ename": "KernelError",
+                              "evalue": "kernel process died",
+                              "trace": "\x1b[91m内核进程已退出\x1b[0m"})
+                        send({"i": req_id, "t": "idle"})
+                        return
+                    if time.monotonic() - last_notice >= 300:
+                        last_notice = time.monotonic()
+                        send({"i": req_id, "t": "notice", "text": "（仍在运行，已等待 300s…）"})
+                    continue
+                last_notice = time.monotonic()
+                if sm.get("msg_type") == "input_request":
+                    send({"i": req_id, "t": "input",
+                          "prompt": (sm.get("content") or {}).get("prompt", "")})
+                    self.kc.input("")
                 continue
             mtype = msg["msg_type"]
             parent = (msg.get("parent_header") or {}).get("msg_id")
@@ -190,9 +256,16 @@ class KernelHost:
                 if content.get("execution_state") == "idle":
                     idle_seen = True
             elif mtype == "execute_input":
-                send({"i": req_id, "t": "exec_input",
-                      "count": content.get("execution_count"),
-                      "code": content.get("code", "")})
+                # 「运行文件」时内核回显的是包装代码：替换为用户视角的 runfile 摘要
+                # （与 Spyder 回显一致，避免 In[n] 倾倒整份包装+源码）
+                if req_id in self._file_reqs:
+                    send({"i": req_id, "t": "exec_input",
+                          "count": content.get("execution_count"),
+                          "code": "runfile(%s)" % json.dumps(self._file_reqs[req_id], ensure_ascii=False)})
+                else:
+                    send({"i": req_id, "t": "exec_input",
+                          "count": content.get("execution_count"),
+                          "code": content.get("code", "")})
             elif mtype == "stream":
                 send({"i": req_id, "t": "stream",
                       "name": content.get("name"),
@@ -211,11 +284,13 @@ class KernelHost:
                       "evalue": content.get("evalue"),
                       "trace": tb})
             elif mtype == "input_request":
-                # 第一版未做真 stdin 回填，自动返回空串避免内核挂起
+                # 兼容：个别 ipykernel 版本可能在 iopub 上广播 input_request
                 send({"i": req_id, "t": "input",
                       "prompt": content.get("prompt", "")})
                 self.kc.input("")
+        self._file_reqs.pop(req_id, None)
         send({"i": req_id, "t": "idle"})
+
 
     @staticmethod
     def _emit_display(req_id, data):
@@ -301,7 +376,7 @@ def main():
         op = req.get("op")
         try:
             if op == "execute":
-                host.execute(req.get("i", 0), req.get("code", ""))
+                host.execute(req.get("i", 0), req.get("code", ""), req.get("file"))
             elif op == "interrupt":
                 host.interrupt()
             elif op == "restart":

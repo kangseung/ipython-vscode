@@ -36,6 +36,7 @@ media/console.html(webview UI) ⇄ postMessage ⇄ extension.js(Node/VS Code 侧
 webview → extension(`postMessage` type):`connect` / `execute` / `complete` / `interrupt` / `restart` / `runMode` / `cwd` / `pickCwd` / `quit`
 
 extension → host(stdin 每行一个 JSON):`{op: execute|complete|interrupt|restart|shutdown, i, code, cursor_pos}`;
+`execute` 运行文件时附加 `file`(绝对路径,host 按 Spyder runfile 语义执行);
 `restart` 必须携带 `cwd`(空串 = 恢复默认目录,host 回退到启动时目录)
 
 host → extension(stdout 每行一个 JSON):`{t: hello|boot|busy|idle|exec_input|stream|result|display|error|notice|status|launch_error|host_stderr}`;
@@ -48,7 +49,7 @@ extension → webview(包装为 `{type:'kernel', ...}`):上述 host 事件 + 附
 1. **内核生命周期 = 面板生命周期**:关闭面板 /「退出」→ 真杀内核进程(零残留)。
    `startKernel()` 幂等(已在跑则直接返回);`stopKernel()` 发 shutdown 后 800ms 兜底 kill。
    `deactivate()` 里同样 stopKernel。
-2. **pendingRun 补发**:内核未就绪时的 `execute`/从头跑请求暂存 `pendingRun`,收到 `hello` 自动补发;
+2. **pendingRun 补发**:内核未就绪时的 `execute`/从头跑请求暂存 `pendingRun`(对象 `{code, file}`),收到 `hello` 自动补发;
    `stopKernel` 清空。新增任何"发代码"路径时复用该机制(不要只 sendProc 不处理启动竞态)。
 3. **配置下发**:webview 无法读 vscode 配置。`outputColors()`+`pushColors()`(colors 事件)在
    connect、建面板、`onDidChangeConfiguration` 三处下发;前端写 `--console-*` CSS 变量并实时生效。
@@ -63,6 +64,13 @@ extension → webview(包装为 `{type:'kernel', ...}`):上述 host 事件 + 附
    UI 改动(目录/运行模式)同步写机器级设置 `ConfigurationTarget.Global`。
 7. **富显示策略在 host**:`display` 只发 `image/png` 或 `text/plain`;DataFrame 用 IPython 原生
    `to_string` 文字表格,勿改用 text/html。
+8. **运行文件(播放键)= Spyder runfile 语义**:`runCurrentFile` 对磁盘文件给 execute 附 `file`;
+   host `_spyder_wrap` 新建 `__main__` 模块命名空间(`__file__`/`__name__`/`__package__`/`__spec__`/
+   `sys.argv` 齐全;代码先经 IPython 输入转换,文件内 `%` 魔法可用),执行后整 ns 合并回 console
+   (变量可查)、pop `__file__`、恢复 `sys.argv`;`exec_input` 回显为 `runfile("<path>")` 摘要
+   (勿改回全量,In[n] 会倾倒包装代码)。不带 `file` 的 execute(输入框/选区)保持单元格语义
+   (无 `__file__`,与 Jupyter 一致)。`input()` 请求走 stdin 通道:execute 循环短轮询
+   `get_stdin_msg`,收到 `input_request` 即回空串,防内核挂起(勿改回只在 iopub 上处理)。
 
 ## 构建 / 发布
 

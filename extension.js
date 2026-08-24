@@ -12,7 +12,7 @@ let reqCounter = 0;
 let kernelReady = false;
 let extContext = undefined;
 let uiCwd = '';               // UI 指定运行目录（空串 = 跟随 VS Code 文件夹/设置项）
-let pendingRun = undefined;   // 内核就绪前的待执行代码（启动竞态不丢请求）
+let pendingRun = undefined;   // 内核就绪前的待执行请求 {code, file}（启动竞态不丢请求）
 
 function randomNonce() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -98,9 +98,9 @@ function startKernel() {
       if (ev.t === 'hello') {
         kernelReady = true;
         if (pendingRun) {
-          const code = pendingRun;
+          const run = pendingRun;
           pendingRun = undefined;
-          sendProc({ op: 'execute', i: ++reqCounter, code: code });
+          sendProc({ op: 'execute', i: ++reqCounter, code: run.code, file: run.file });
         }
       }
       notify(ev);
@@ -129,6 +129,7 @@ function startKernel() {
   proc.on('exit', (code) => {
     if (proc !== kernelProc) return;   // 已被 stopKernel 替换/清理
     kernelProc = undefined;
+    pendingRun = undefined;            // 与 stopKernel 对齐：启动失败/意外退出不留陈请求
     if (!kernelReady) {
       notify({ t: 'launch_error', text: '管家进程启动失败（exit ' + code + '）\n解释器：' + pythonPath() + '\n请确认该解释器已安装 ipykernel 与 jupyter_client' });
     } else {
@@ -293,19 +294,22 @@ function runCurrentFile() {
   if (!ed) return;
   const code = ed.document.getText();
   if (!code.trim()) return;
+  // 磁盘文件 → 携带 file：host 按 Spyder runfile 语义执行（__file__ 等可用）。
+  // 未保存/untitled 文档无磁盘路径，退回普通执行（与单元格一致）。
+  const file = ed.document.uri.scheme === 'file' ? ed.document.uri.fsPath : undefined;
   ensurePanel(false);            // 面板带到前台：已打开时也切过去，运行结果立即可见
   if (runMode() === 'fresh' && kernelProc && kernelReady) {
     // 从头跑：内核已就绪 → 先重启（重置变量/重新加载 import），hello 后自动补发文件
-    pendingRun = code;
+    pendingRun = { code: code, file: file };
     restartKernel();
     return;
   }
   if (!kernelProc) startKernel();
   if (!kernelReady) {
-    pendingRun = code;           // 内核启动中/未启动（新内核天然 fresh）：hello 后自动补发
+    pendingRun = { code: code, file: file };   // 内核启动中/未启动（新内核天然 fresh）：hello 后自动补发
     return;
   }
-  sendProc({ op: 'execute', i: ++reqCounter, code: code });
+  sendProc({ op: 'execute', i: ++reqCounter, code: code, file: file });
 }
 function activate(context) {
   extContext = context;

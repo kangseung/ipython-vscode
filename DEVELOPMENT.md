@@ -20,7 +20,16 @@
   中断用 `os.kill(pid, SIGINT)`（ipykernel 6.x 原生 interrupt 通道只杀子进程）
 - **media/console.html**：UI + 前端状态机（输入/输出/补全面板/历史/按键）
 
-请求（stdin）：`{op: execute|complete|interrupt|restart|shutdown, i, code, cursor_pos}`（restart 携带 `cwd`，空串 = 恢复默认目录）
+请求（stdin）：`{op: execute|complete|interrupt|restart|shutdown, i, code, cursor_pos}`；`execute`
+运行文件时附加 `file`（绝对路径，host 按 Spyder runfile 语义执行）；`restart` 携带 `cwd`（空串 = 恢复默认目录）
+
+## 运行文件语义（播放键）
+
+`runCurrentFile` 对磁盘文件给 execute 附 `file`；`kernel_host._spyder_wrap` 以 Spyder runfile
+等价方式执行：新建 `__main__` 模块命名空间（`__file__`/`__name__`/`__package__`/`__spec__`/
+`sys.argv` 齐全；代码先经 IPython 输入转换，文件内 `%` 魔法可用），执行后整 ns 合并回 console
+（变量可查）、pop `__file__`、恢复 `sys.argv`；`exec_input` 回显为 `runfile("<path>")` 摘要。
+启动竞态走 `pendingRun({code, file})` 补发。输入框/选区执行不带 `file`，保持单元格语义。
 
 事件（stdout）：`{t: hello|boot|busy|idle|exec_input|stream|result|display|
 error|notice|status|launch_error|host_stderr, ...}`
@@ -52,9 +61,9 @@ webview → 扩展：`{type: execute|complete|interrupt|restart|quit|connect|pic
 ## 已知限制
 
 - 输入 `> 15` 万字符自动截断显示
-- `input()` 调用在控制台内自动回退为空字符串（不阻塞）
 - 含调用的表达式补全（如 `df.cumsum().plot`）依赖内核求值，部分场景无候选
 - `\r`（tqdm 进度条）为追加渲染，不覆盖刷新
+- `input()` 调用自动回空字符串（host 短轮询 stdin 通道响应 `input_request`，不阻塞、不挂起）
 
 ## 项目结构
 

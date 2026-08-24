@@ -43,6 +43,19 @@ DataFrame 文字表格、matplotlib 内嵌图、补全、历史、一键运行�
 - 发送运行(编辑器):`Shift+Enter`
 - 运行当前文件:右上角播放图标(或命令面板)
 
+## 运行文件(Spyder runfile 语义)
+
+右上角播放键 / 命令 **"IPython Console: 运行当前文件"** 以 Spyder runfile 等价语义运行当前文件:
+
+- `__file__` / `__name__` / `__package__` / `sys.argv` 齐全,`os.path.dirname(os.path.abspath(__file__))` 这类写法正常工作
+- 脚本定义的变量、导入的模块运行后保留在内核命名空间,可直接在控制台查询
+- 未保存的文件也能运行(取编辑器缓冲区内容);不要求文件已落盘
+- 文件内 `%` 魔法(如 `%matplotlib inline`、`%time`、`!shell`)可用
+- 报错 traceback 精确定位到真实文件名与行号
+
+输入框手输或 `Shift+Enter` 发送选区 = 普通单元格执行(与 Jupyter 一致,无 `__file__`)。
+
+
 ## 依赖
 
 Python 环境需安装:
