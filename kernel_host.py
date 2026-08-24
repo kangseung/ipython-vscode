@@ -30,7 +30,14 @@ import threading
 if sys.platform == "win32":
     # Windows 默认 Proactor 事件循环不支持 zmq 的 add_reader，pyzmq 会打 RuntimeWarning
     # 并降级到 selector 线程。切换为 Selector 循环（与 Linux 默认一致）可消除该告警。
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    # set_event_loop_policy/WindowsSelectorEventLoopPolicy 自 3.12 弃用、3.16 移除：
+    # 设置失败仅回退 Proactor（打警告不停机），故忽略异常。
+    _sel = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if _sel is not None:
+        try:
+            asyncio.set_event_loop_policy(_sel())
+        except Exception:
+            pass
 
 from jupyter_client import BlockingKernelClient
 from jupyter_client.connect import write_connection_file
@@ -86,9 +93,12 @@ class KernelHost:
         send({"t": "boot", "text": "准备启动 ipykernel 子进程…"})
         # 内核启动 import debugpy/pydevd_plugins → pkg_resources，setuptools 81+ 会打
         # 弃用 UserWarning（透传到控制台刷屏）。追加消息级过滤，其余警告维持 Python 默认。
+        # pkg_resources 特判必须置首：warnings 过滤器 first-match-wins，用户若设了
+        # PYTHONWARNINGS=default/always（显式开警告）会先命中显示；特判置首才能
+        # 压掉该启动噪声，其余用户配置保持优先。
         _warn = os.environ.get("PYTHONWARNINGS")
-        _filters = (([_warn] if _warn else [])
-                    + ["ignore:pkg_resources is deprecated as an API:UserWarning"]
+        _filters = (["ignore:pkg_resources is deprecated as an API:UserWarning"]
+                    + ([_warn] if _warn else [])
                     + ["default::DeprecationWarning:__main__", "ignore::DeprecationWarning",
                        "ignore::PendingDeprecationWarning", "ignore::ImportWarning",
                        "ignore::ResourceWarning"])
@@ -108,7 +118,15 @@ class KernelHost:
         #（进程其实还活着）。关掉后 is_alive 走兜底 True，由 shell kernel_info reply 判定就绪；
         # 真实进程存活由本类 is_alive()（proc.poll）把关。
         self.kc.start_channels(hb=False)
-        self.kc.wait_for_ready(timeout=20)  # 20 秒无响应即抛错 → launch_error 红字
+        try:
+            self.kc.wait_for_ready(timeout=20)  # 20 秒无响应即抛错 → launch_error 红字
+        except Exception as e:
+            slow = self.proc is not None and self.proc.poll() is None
+            self._shutdown_kernel()  # 清理残留，防内核稍后起来成孤儿占端口
+            # 区分「进程已死」与「进程存活但慢启动」：报错信息准确，两者都终止本轮
+            if slow:
+                raise RuntimeError("内核 20 秒未响应（进程仍存活，已终止本轮启动）: %s" % e) from e
+            raise RuntimeError("内核进程在就绪前已退出: %s" % e) from e
         send({"t": "boot", "text": "内核就绪，启用 matplotlib inline…"})
         self._setup()
         self._announce()
@@ -364,6 +382,7 @@ def main():
         host.start()
     except Exception:
         import traceback
+        host.shutdown()   # 幂等：清掉 start 中途残留的内核进程/连接文件
         send({"t": "launch_error",
               "text": "%s\n请检查 ipythonConsole.pythonPath 配置的解释器已安装 ipykernel 与 jupyter_client"
                       % traceback.format_exc()})
