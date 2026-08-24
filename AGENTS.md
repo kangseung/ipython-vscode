@@ -78,7 +78,13 @@ extension → webview(包装为 `{type:'kernel', ...}`):上述 host 事件 + 附
   vsce 只认根 `README.md` 为市场 README(自定义 readme 路径官方不支持);`DEVELOPMENT.md` 已被
   `.vscodeignore` 排除出包;`.vscodeignore` 必须保留 `*.vsix`(防打包产物打自己)。
 - 发布:`npx @vscode/vsce publish`——publisher 必须为 `jiangsheng`(已登录 PAT);
-  市场不接受重复版本号,发新版先 bump `package.json` 版本 + 前端 banner,再打包提交。
+  市场不接受重复版本号,发新版先做「三处版本标记同步」再打包提交。
+- **发版三处同步(缺一即未完成)**:`package.json` 版本号、`media/console.html` 前端
+  banner(`前端 vX.Y.Z`)、`CHANGELOG.md` 新版本条目,三者一致;CHANGELOG 按 Keep a
+  Changelog 格式记「修复/新增」条目,版本号与 package.json 同步。
+- **改代码必更文档 + 必重编译**:用户可见行为改动(设置项/命令/快捷键/输出/渲染)必须
+  同步 `README.md`(设置表/快速上手/说明);每次改动后重新 `npx @vscode/vsce package`
+  编译产物——代码 / 文档 / 产物必须同批提交,不允许只提交代码而漏文档或产物。
 - 仓库保持含打包产物 `ipython-vscode-<version>.vsix`,发新版时同步替换(rename)并 commit。
 
 ## 验证(每次改动后必做)
@@ -91,7 +97,8 @@ node --check extension.js
 - 前端两个 `<script>` 块提取后分别 `node --check`(用 python 正则提取)
 - host 冒烟:管道喂 `kernel_host.py`,读 `hello` → execute `6*7` 得 42 → `shutdown` 干净退出
 - package.json 断言:命令/activationEvents 一一对应、menus 只剩 `editor/title`+`editor/context`、无 Demo 残留
-- 本机 F5 开发宿主窗口实测 UI(双行工具栏、流式输入、配色、目录/运行模式切换)
+- 文档/产物一致性:grep 版本号三处一致(`package.json` / banner / `CHANGELOG.md` 顶部);
+  `ls *.vsix` 为当前版本产物;README 设置表与 package.json 配置项一致
 
 ## 已知限制(别当成 bug 修)
 

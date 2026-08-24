@@ -6,3 +6,4 @@ __pycache__/
 *.vsix
 code_review/
 DEVELOPMENT.md
+AGENTS.md
