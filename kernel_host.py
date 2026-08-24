@@ -14,6 +14,7 @@
 
 调试：设置环境变量 IPYHOST_DEBUG=1 在 stderr 打印逐条 iopub。
 """
+import asyncio
 import atexit
 import json
 import os
@@ -25,6 +26,11 @@ import sys
 import tempfile
 import time
 import threading
+
+if sys.platform == "win32":
+    # Windows 默认 Proactor 事件循环不支持 zmq 的 add_reader，pyzmq 会打 RuntimeWarning
+    # 并降级到 selector 线程。切换为 Selector 循环（与 Linux 默认一致）可消除该告警。
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from jupyter_client import BlockingKernelClient
 from jupyter_client.connect import write_connection_file
@@ -78,15 +84,30 @@ class KernelHost:
             hb_port=_rand_port(),
         )
         send({"t": "boot", "text": "准备启动 ipykernel 子进程…"})
+        # 内核启动 import debugpy/pydevd_plugins → pkg_resources，setuptools 81+ 会打
+        # 弃用 UserWarning（透传到控制台刷屏）。追加消息级过滤，其余警告维持 Python 默认。
+        _warn = os.environ.get("PYTHONWARNINGS")
+        _filters = (([_warn] if _warn else [])
+                    + ["ignore:pkg_resources is deprecated as an API:UserWarning"]
+                    + ["default::DeprecationWarning:__main__", "ignore::DeprecationWarning",
+                       "ignore::PendingDeprecationWarning", "ignore::ImportWarning",
+                       "ignore::ResourceWarning"])
+        _env = dict(os.environ)
+        _env["PYTHONWARNINGS"] = ",".join(_filters)
         self.proc = subprocess.Popen(
             [sys.executable, "-m", "ipykernel_launcher", "-f", self.cf],
             stdout=subprocess.DEVNULL,
             stderr=None,  # kernel 日志透传到本进程 stderr（扩展可观测）
+            env=_env,
         )
         send({"t": "boot", "text": "连接内核通道（等待就绪）…"})
         self.kc = BlockingKernelClient(connection_file=self.cf)
         self.kc.load_connection_file()
-        self.kc.start_channels()
+        # 关心跳通道：Windows 上独立 client 的 wait_for_ready 用心跳 is_beating() 判死，
+        # 内核冷启动完成前首个心跳周期未确认 → 误报 "Kernel died before replying to kernel_info"
+        #（进程其实还活着）。关掉后 is_alive 走兜底 True，由 shell kernel_info reply 判定就绪；
+        # 真实进程存活由本类 is_alive()（proc.poll）把关。
+        self.kc.start_channels(hb=False)
         self.kc.wait_for_ready(timeout=20)  # 20 秒无响应即抛错 → launch_error 红字
         send({"t": "boot", "text": "内核就绪，启用 matplotlib inline…"})
         self._setup()
