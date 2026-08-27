@@ -302,16 +302,17 @@ function runMode() {
   return vscode.workspace.getConfiguration('ipythonConsole').get('runMode', 'append') === 'fresh' ? 'fresh' : 'append';
 }
 
-// 输出区配色（白底 qtconsole 风格，可在设置中改色）
+// 输出区配色:用户显式设置的 output* 下发实际值;留空的由前端按当前主题自适应派生
+// (浅/深各一套:背景 5% 同色系偏移、文字随背景对撞选色、ANSI 16 色按明暗换表)
 function outputColors() {
   const cfg = vscode.workspace.getConfiguration('ipythonConsole');
   return {
-    background: cfg.get('outputBackground', '#ffffff'),
-    foreground: cfg.get('outputForeground', '#000000'),
-    promptIn: cfg.get('outputPromptIn', '#0a7a4f'),
-    promptOut: cfg.get('outputPromptOut', '#0a47a0'),
-    stderr: cfg.get('outputStderr', '#a1260d'),
-    muted: cfg.get('outputMuted', '#606060')
+    background: cfg.get('outputBackground', ''),
+    foreground: cfg.get('outputForeground', ''),
+    promptIn: cfg.get('outputPromptIn', ''),
+    promptOut: cfg.get('outputPromptOut', ''),
+    stderr: cfg.get('outputStderr', ''),
+    muted: cfg.get('outputMuted', '')
   };
 }
 function pushColors() {
@@ -417,6 +418,9 @@ function activate(context) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('ipythonConsole')) pushColors();
+    }),
+    vscode.window.onDidChangeActiveColorTheme(() => {   // 主题切换:重推 colors,前端按新主题背景重新派生
+      if (panel) pushColors();
     }),
     vscode.commands.registerCommand('ipy.open', () => {
       ensurePanel(false);

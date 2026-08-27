@@ -26,16 +26,87 @@ DataFrame 文字表格、matplotlib 内嵌图、补全、历史、一键运行�
 | `ipythonConsole.pythonPath` | 自动探测 | 内核解释器(需已装 `ipykernel` 与 `jupyter_client`;留空自动探测,Windows 下排除微软商店存根,建议填 `python.exe` 绝对路径);改后重启内核 |
 | `ipythonConsole.workingDir` | VS Code 当前文件夹 | IPython 运行目录;改后重启内核 |
 | `ipythonConsole.runMode` | `append` | 播放键:`append` 接着跑 / `fresh` 从头跑 |
-| `ipythonConsole.outputBackground` | `#ffffff` | 输出区背景色 |
-| `ipythonConsole.outputForeground` | `#000000` | 输出区前景色 |
-| `ipythonConsole.outputPromptIn` | `#0a7a4f` | In 提示符颜色 |
-| `ipythonConsole.outputPromptOut` | `#0a47a0` | Out 提示符颜色 |
-| `ipythonConsole.outputStderr` | `#a1260d` | stderr / traceback 颜色 |
-| `ipythonConsole.outputMuted` | `#606060` | 次级说明文字颜色 |
+| `ipythonConsole.outputBackground` | 跟随主题 | 输出区背景色;留空 = 自动跟随主题(背景分级往白偏移:暗底微提亮成暗灰、中间浅色明显变淡、近白大幅白化,绝不往深走),填写颜色值则固定使用 |
+| `ipythonConsole.outputForeground` | 跟随主题 | 输出区前景色(代码、stdout、结果文字);留空 = 自动按背景明暗对撞选色(暗底亮字、亮底深字),填写则固定 |
+| `ipythonConsole.outputPromptIn` | 跟随主题 | In 提示符颜色(qtconsole 绿,随明暗换深浅) |
+| `ipythonConsole.outputPromptOut` | 跟随主题 | Out 提示符颜色(qtconsole 蓝,随明暗换深浅) |
+| `ipythonConsole.outputStderr` | 跟随主题 | stderr / traceback 颜色 |
+| `ipythonConsole.outputMuted` | 跟随主题 | 次级说明文字颜色 |
 
-颜色设置改后即时生效,无需重启内核。
+颜色设置留空时自动跟随当前主题：背景**分级往白偏移**——暗底微提亮 5% 成暗灰、中间浅色明显变淡 15%、近白大幅白化（与编辑器底色拉开差异），方向只有往白、**绝不往深/黑走**；文字与 ANSI 输出按背景明暗自适应（暗底亮字、亮底深字，附对比度兜底保证可读），切换主题实时跟随。显式填写颜色值后固定使用该色。颜色改动即时生效，无需重启内核。
 
 `ipythonConsole.pythonPath` 与 `ipythonConsole.workingDir` 可写在**用户设置**或**工作区 `.vscode/settings.json`**(两者都生效,工作区优先);修改后点工具栏「重启内核」生效。
+
+### 常用配色方案(可选,复制即用)
+
+颜色默认自适应当前主题;想固定风格,把下面任一套复制进 `settings.json` 即可。
+只填 `outputBackground` / `outputForeground` 两项也能生效(前景、ANSI 16 色、提示符色会按背景明暗自动配套),其余项可选填。
+
+**白色(qtconsole 经典白底)**
+
+```json
+{
+  "ipythonConsole.outputBackground": "#ffffff",
+  "ipythonConsole.outputForeground": "#000000",
+  "ipythonConsole.outputPromptIn": "#0a7a4f",
+  "ipythonConsole.outputPromptOut": "#0a47a0",
+  "ipythonConsole.outputStderr": "#a1260d",
+  "ipythonConsole.outputMuted": "#606060"
+}
+```
+
+**深色 Dracula**
+
+```json
+{
+  "ipythonConsole.outputBackground": "#282a36",
+  "ipythonConsole.outputForeground": "#f8f8f2",
+  "ipythonConsole.outputPromptIn": "#50fa7b",
+  "ipythonConsole.outputPromptOut": "#8be9fd",
+  "ipythonConsole.outputStderr": "#ff5555",
+  "ipythonConsole.outputMuted": "#6272a4"
+}
+```
+
+**深色 One Dark**
+
+```json
+{
+  "ipythonConsole.outputBackground": "#282c34",
+  "ipythonConsole.outputForeground": "#abb2bf",
+  "ipythonConsole.outputPromptIn": "#98c379",
+  "ipythonConsole.outputPromptOut": "#61afef",
+  "ipythonConsole.outputStderr": "#e06c75",
+  "ipythonConsole.outputMuted": "#5c6370"
+}
+```
+
+**深色 Solarized**
+
+```json
+{
+  "ipythonConsole.outputBackground": "#002b36",
+  "ipythonConsole.outputForeground": "#839496",
+  "ipythonConsole.outputPromptIn": "#859900",
+  "ipythonConsole.outputPromptOut": "#268bd2",
+  "ipythonConsole.outputStderr": "#dc322f",
+  "ipythonConsole.outputMuted": "#586e75"
+}
+```
+
+**浅色 Solarized**
+
+```json
+{
+  "ipythonConsole.outputBackground": "#fdf6e3",
+  "ipythonConsole.outputForeground": "#073642",
+  "ipythonConsole.outputPromptIn": "#859900",
+  "ipythonConsole.outputPromptOut": "#268bd2",
+  "ipythonConsole.outputStderr": "#dc322f",
+  "ipythonConsole.outputMuted": "#586e75"
+}
+```
+
 
 ## 快捷键(可自行更改)
 

@@ -93,10 +93,10 @@
     padding: 7px 8px; border-top: 1px solid var(--vscode-panel-border, #3f3f3f);
     background: var(--vscode-input-background, #1f1f1f);
   }
-  #prompt { flex: none; font-weight: 600; color: #4ec9b0; line-height: 1.5; user-select: none; }
+  #prompt { flex: none; font-weight: 600; color: var(--console-prompt-in, #4ec9b0); line-height: 1.5; user-select: none; }
   #input {
     flex: 1; background: transparent; border: none; outline: none; resize: none;
-    color: var(--vscode-input-foreground, #d4d4d4);
+    color: var(--console-fg, var(--vscode-input-foreground, #d4d4d4));
     font: inherit; line-height: 1.5; min-height: 2em; max-height: 220px; padding: 0 0 2px 0;
   }
   #input::placeholder { color: var(--vscode-input-placeholderForeground, #6f6f6f); }
@@ -111,7 +111,7 @@
   .ci { padding: 2px 8px; cursor: pointer; white-space: pre; }
   .ci.sel { background: var(--vscode-list-hoverBackground, #2a2d2e); }
   /* ---- 输出区配色（默认白底 qtconsole 风格，可用 ipythonConsole.output* 配置）---- */
-  #output { background: var(--console-bg, #ffffff); color: var(--console-fg, #000000); }
+  #output { background: var(--console-bg, var(--vscode-editor-background, #ffffff)); color: var(--console-fg, var(--vscode-editor-foreground, #000000)); }
   #output .code { color: var(--console-fg, #000000); }
   #output .prompt-in { color: var(--console-prompt-in, #0a7a4f); }
   #output .prompt-out { color: var(--console-prompt-out, #0a47a0); }
@@ -164,12 +164,114 @@ function esc(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-var ANSI_COLORS = {
+/* ---- 配色派生:输出区按当前主题自适应(浅/深各一套,纯函数可 node 测试) ---- */
+function parseColor(s) {
+  if (!s) return null;
+  s = s.trim();
+  var m;
+  if (m = s.match(/^#([0-9a-f]{3})$/i)) {
+    return {
+      r: parseInt(m[1][0] + m[1][0], 16),
+      g: parseInt(m[1][1] + m[1][1], 16),
+      b: parseInt(m[1][2] + m[1][2], 16)
+    };
+  }
+  if (m = s.match(/^#([0-9a-f]{6})$/i)) {
+    return {
+      r: parseInt(m[1].slice(0, 2), 16),
+      g: parseInt(m[1].slice(2, 4), 16),
+      b: parseInt(m[1].slice(4, 6), 16)
+    };
+  }
+  if (m = s.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i)) {
+    return { r: +m[1], g: +m[2], b: +m[3] };
+  }
+  if (m = s.match(/^rgba?\(\s*(\d+)\s+(\d+)\s+(\d+)/i)) {   // 现代语法 rgb(253 246 227)
+    return { r: +m[1], g: +m[2], b: +m[3] };
+  }
+  return null;
+}
+function toHex(c) {
+  function h(v) {
+    v = Math.max(0, Math.min(255, Math.round(v)));
+    var t = v.toString(16);
+    return t.length === 1 ? '0' + t : t;
+  }
+  return '#' + h(c.r) + h(c.g) + h(c.b);
+}
+// 按 t∈[0,1] 从 c1 向 c2 线性混合,保持色相同色系、只调亮度
+function mix(c1, c2, t) {
+  return {
+    r: c1.r + (c2.r - c1.r) * t,
+    g: c1.g + (c2.g - c1.g) * t,
+    b: c1.b + (c2.b - c1.b) * t
+  };
+}
+function _lin(c) { c = c / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+function relLuminance(c) { return 0.2126 * _lin(c.r) + 0.7152 * _lin(c.g) + 0.0722 * _lin(c.b); }
+function contrastRatio(c1, c2) {
+  var l1 = relLuminance(c1), l2 = relLuminance(c2);
+  if (l1 < l2) { var t = l1; l1 = l2; l2 = t; }
+  return (l1 + 0.05) / (l2 + 0.05);
+}
+
+// 亮底表(白底 qtconsole 风格)与暗底表(VS Code 深色终端色),按生效背景明暗切换
+var ANSI_LIGHT = {
   '30': '#000000', '31': '#a1260d', '32': '#0a7a3f', '33': '#9c6d00',
   '34': '#0a47a0', '35': '#8b2fc9', '36': '#0a7a7a', '37': '#303030',
   '90': '#6f6f6f', '91': '#e2483d', '92': '#35a35c', '93': '#c09a2e',
   '94': '#4f81c1', '95': '#a253c9', '96': '#2fb2b2', '97': '#000000'
 };
+var ANSI_DARK = {
+  '30': '#1e1e1e', '31': '#cd3131', '32': '#0dbc79', '33': '#e5e510',
+  '34': '#2472c8', '35': '#bc3fbc', '36': '#11a8cd', '37': '#e5e5e5',
+  '90': '#666666', '91': '#f14c4c', '92': '#23d18b', '93': '#f5f543',
+  '94': '#3b8eea', '95': '#d670d6', '96': '#29b8db', '97': '#e5e5e5'
+};
+var ANSI_COLORS = ANSI_LIGHT;
+
+// 主题自适应配色:按当前主题编辑器背景明暗自适应,用户显式颜色(ov,空串=未设)优先。
+// themeBg:当前主题解析后的编辑器背景色;hc:高对比度主题不偏移(对比度是刚需)。
+// 方向铁律:背景统一往白偏移 5%(提亮/变淡)——浅色主题"变白",深色主题提亮成
+// 暗灰;绝不往黑/深方向走(压暗会把浅色推成灰暗,用户实测反馈确认)。
+// 文字始终按明暗对撞:亮底深字、暗底亮字。前景先校验对比度 ≥ 4.5,不够继续
+// 加重偏移;对撞端全部不达标(如中灰主题)则换另一端试,仍失败取对比最高端。
+function derivePalette(themeBg, ov, hc) {
+  ov = ov || {};
+  var base = parseColor(themeBg) || { r: 30, g: 30, b: 30 };
+  var l = relLuminance(base);
+  var dark = l < 0.4;
+  // 背景偏移分级"往白":暗底 5%(微提亮成暗灰,保持暗色感不失控)、中间浅色 15%
+  // (明显变淡)、近白 90%(大幅白化,与编辑器底色拉开可感知差异——近白往白空间小,
+  // 固定比例做不出效果)。高对比度主题不偏移。方向只有往白,绝不往深走。
+  var shift = hc ? 0 : (l < 0.4 ? 0.05 : (l < 0.85 ? 0.15 : 0.9));
+  var bg = mix(base, { r: 255, g: 255, b: 255 }, shift);
+  var fgEnd = dark ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
+  var fg, best;
+  for (var pass = 0; pass < 2; pass++) {
+    var end = pass === 0 ? fgEnd : (dark ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 });
+    var done = false;
+    for (var i = 0; i < 3; i++) {
+      var s = 0.85 + i * 0.075;   // 0.85 → 0.925 → 1.0
+      var cand = mix(bg, end, s);
+      var cr = contrastRatio(bg, cand);
+      if (!best || cr > best.cr) best = { cr: cr, color: cand };
+      if (cr >= 4.5) { fg = cand; done = true; break; }
+    }
+    if (done) { best = null; break; }
+  }
+  if (best) fg = best.color;
+  return {
+    background: ov.background || toHex(bg),
+    foreground: ov.foreground || toHex(fg),
+    promptIn: ov.promptIn || (dark ? '#23d18b' : '#0a7a4f'),
+    promptOut: ov.promptOut || (dark ? '#3b8eea' : '#0a47a0'),
+    stderr: ov.stderr || (dark ? '#f48771' : '#a1260d'),
+    muted: ov.muted || (dark ? '#9da5b4' : '#606060'),
+    ansi: dark ? ANSI_DARK : ANSI_LIGHT,
+    dark: dark
+  };
+}
 
 function ansiToHtml(text) {
   var parts = [];
@@ -474,6 +576,46 @@ function ansiToHtml(text) {
     completionHide();
   }
 
+  /* ---- 输出配色:显式设置的 output* 优先,未设置的按当前主题自适应派生 ---- */
+  function readThemeBg() {
+    // 读不到(空)由调用方处理:不得静默回落成暗色
+    return getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-background').trim() || '';
+  }
+  function isHighContrast() {
+    return document.body && document.body.classList.contains('vscode-high-contrast');
+  }
+  function applyColors(ev) {
+    ev = ev || {};
+    var root = document.documentElement.style;
+    var raw = readThemeBg();
+    if (!parseColor(raw)) {
+      // 主题背景读不到/格式意外:清掉自定义色,让 CSS 回落到 vscode 编辑器底色
+      // (--console-bg fallback 链),绝不静默变暗;打一条可见诊断便于反馈。
+      ['--console-bg', '--console-fg', '--console-prompt-in', '--console-prompt-out',
+       '--console-stderr', '--console-muted'].forEach(function (k) {
+        root.removeProperty(k);
+      });
+      addBanner('（配色诊断）未能读取主题背景色（' + raw + '），已临时跟随编辑器底色，请把此提示反馈给开发者。\n', 'banner-err');
+      return;
+    }
+    var pal = derivePalette(raw, {
+      background: ev.background || '',
+      foreground: ev.foreground || '',
+      promptIn: ev.promptIn || '',
+      promptOut: ev.promptOut || '',
+      stderr: ev.stderr || '',
+      muted: ev.muted || ''
+    }, isHighContrast());
+    ANSI_COLORS = pal.ansi;   // ansiToHtml 读取同一份表,深浅随背景切换
+    root.setProperty('--console-bg', pal.background);
+    root.setProperty('--console-fg', pal.foreground);
+    root.setProperty('--console-prompt-in', pal.promptIn);
+    root.setProperty('--console-prompt-out', pal.promptOut);
+    root.setProperty('--console-stderr', pal.stderr);
+    root.setProperty('--console-muted', pal.muted);
+  }
+  function applyThemeColors() { applyColors({}); }   // 初始化兜底:面板一开就按主题上色,不等 colors 事件
+
   /* ---- 内核事件 ---- */
   function handleKernel(ev) {
     switch (ev.t) {
@@ -496,12 +638,7 @@ function ansiToHtml(text) {
         else runmodeEl.value = 'append';
         break;
       case 'colors':
-        document.documentElement.style.setProperty('--console-bg', ev.background || '#ffffff');
-        document.documentElement.style.setProperty('--console-fg', ev.foreground || '#000000');
-        document.documentElement.style.setProperty('--console-prompt-in', ev.promptIn || '#0a7a4f');
-        document.documentElement.style.setProperty('--console-prompt-out', ev.promptOut || '#0a47a0');
-        document.documentElement.style.setProperty('--console-stderr', ev.stderr || '#a1260d');
-        document.documentElement.style.setProperty('--console-muted', ev.muted || '#606060');
+        applyColors(ev);
         break;
       case 'cwd_picked':
         cwdInput.value = ev.cwd || '';
@@ -678,7 +815,8 @@ function ansiToHtml(text) {
   var connTimer = setTimeout(function () {
     addBanner('25 秒未收到内核响应。\n若按钮也无反应，此面板可能未被扩展接管（僵尸面板）：请点标签栏 × 关闭本面板，\n然后按 Ctrl+Alt+O 重新打开即可恢复。\n', 'banner-err');
   }, 25000);
-  addBanner('IPython Console · 前端 v1.3.2 · 正在连接 IPython kernel…');
+  addBanner('IPython Console · 前端 v1.4.0 · 正在连接 IPython kernel…');
+  applyThemeColors();   // 面板一开立即按当前主题上色(白闪抑制;以后台主题切换由扩展 colors 事件驱动)
   // 扩展未激活时首次 connect 会丢失（窗口恢复场景），每 5 秒自动重发直到 hello
   function ensureConnect() {
     vscodeApi.postMessage({ type: 'connect' });

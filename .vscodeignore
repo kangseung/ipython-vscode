@@ -1,6 +1,7 @@
 .vscodeignore
 .gitignore
 .vscode/
+.claude/
 __pycache__/
 *.pyc
 *.vsix

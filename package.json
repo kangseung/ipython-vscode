@@ -2,7 +2,7 @@
   "name": "ipython-vscode",
   "displayName": "IPython Console",
   "description": "qtconsole 手感的 IPython 控制台（真实 ipykernel）",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "publisher": "jiangsheng",
   "engines": {
     "vscode": "^1.85.0"
@@ -49,43 +49,43 @@
         "ipythonConsole.outputBackground": {
           "type": "string",
           "format": "color-hex",
-          "default": "#ffffff",
-          "markdownDescription": "**输出区背景色**（默认白底 qtconsole 风格）。改颜色即时生效，无需重启内核。",
+          "default": "",
+          "markdownDescription": "**输出区背景色**。留空 = 自动跟随当前主题：背景分级往白偏移——暗底微提亮 5% 成暗灰、中间浅色明显变淡 15%、近白大幅白化（与编辑器底色拉开差异），方向只有往白、绝不往深走；填写颜色值（如 `#282a36`）则固定使用。改后即时生效，无需重启内核。",
           "scope": "machine"
         },
         "ipythonConsole.outputForeground": {
           "type": "string",
           "format": "color-hex",
-          "default": "#000000",
-          "markdownDescription": "**输出区前景色**（代码、stdout、结果文字）。",
+          "default": "",
+          "markdownDescription": "**输出区前景色**（代码、stdout、结果文字）。留空 = 自动：暗底配亮字、亮底配深字，保证可读（含对比度兜底）；填写颜色值则固定使用。",
           "scope": "machine"
         },
         "ipythonConsole.outputPromptIn": {
           "type": "string",
           "format": "color-hex",
-          "default": "#0a7a4f",
-          "markdownDescription": "**In 提示符颜色**。",
+          "default": "",
+          "markdownDescription": "**In 提示符颜色**。留空 = 随主题明暗自动选色（保持 qtconsole 绿）。",
           "scope": "machine"
         },
         "ipythonConsole.outputPromptOut": {
           "type": "string",
           "format": "color-hex",
-          "default": "#0a47a0",
-          "markdownDescription": "**Out 提示符颜色**。",
+          "default": "",
+          "markdownDescription": "**Out 提示符颜色**。留空 = 随主题明暗自动选色（保持 qtconsole 蓝）。",
           "scope": "machine"
         },
         "ipythonConsole.outputStderr": {
           "type": "string",
           "format": "color-hex",
-          "default": "#a1260d",
-          "markdownDescription": "**stderr / traceback / 错误横幅颜色**。",
+          "default": "",
+          "markdownDescription": "**stderr / traceback / 错误横幅颜色**。留空 = 随主题明暗自动选色。",
           "scope": "machine"
         },
         "ipythonConsole.outputMuted": {
           "type": "string",
           "format": "color-hex",
-          "default": "#606060",
-          "markdownDescription": "**次级说明文字颜色**（banner 提示、截断标记）。",
+          "default": "",
+          "markdownDescription": "**次级说明文字颜色**（banner 提示、截断标记）。留空 = 随主题明暗自动选色。",
           "scope": "machine"
         }
       }
