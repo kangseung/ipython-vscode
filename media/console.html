@@ -267,10 +267,15 @@ function ansiToHtml(text) {
     statusEl.textContent = text;
   }
 
-  function maybeScroll() {
+  // 距底部 120px 内视为"近底跟随"；bottomNear() 必须在 DOM 插入前取快照，
+  // 否则插入大段输出后 scrollHeight 已变大，比较失真导致该滚不滚。
+  function bottomNear() {
     var el = output;
-    var nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    if (nearBottom) el.scrollTop = el.scrollHeight;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }
+  function maybeScroll(wasNearBottom) {
+    if (wasNearBottom === undefined) wasNearBottom = bottomNear();
+    if (wasNearBottom) output.scrollTop = output.scrollHeight;
   }
   function scrollBottom() {
     output.scrollTop = output.scrollHeight;
@@ -283,17 +288,19 @@ function ansiToHtml(text) {
   }
 
   function addBanner(text, cls) {
+    var near = bottomNear();
     var block = document.createElement('div');
     block.className = 'block';
     block.innerHTML = '<pre class="banner' + (cls ? ' ' + cls : '') + '">' + esc(text) + '</pre>';
     output.insertBefore(block, inputbar);
     trimNode(output);
-    maybeScroll();
+    maybeScroll(near);
     return block;
   }
 
   function blockFor(req) {
     if (!blocks.has(req)) {
+      var near = bottomNear();
       var el = document.createElement('div');
       el.className = 'block';
       var out = document.createElement('div');
@@ -302,17 +309,18 @@ function ansiToHtml(text) {
       output.insertBefore(el, inputbar);
       trimNode(output);
       blocks.set(req, el);
-      maybeScroll();
+      maybeScroll(near);
     }
     return blocks.get(req);
   }
 
   function execEl(el, count, code) {
+    var near = bottomNear();
     var d = document.createElement('div');
     d.className = 'exec';
     d.innerHTML = '<span class="prompt prompt-in">In [' + count + ']:</span> <span class="code">' + esc(code) + '</span>';
     el.insertBefore(d, el.firstChild);
-    maybeScroll();
+    maybeScroll(near);
   }
 
   function getStream(el, cls) {
@@ -326,39 +334,43 @@ function ansiToHtml(text) {
   }
 
   function appendStream(el, text, cls) {
+    var near = bottomNear();
     var pre = getStream(el, cls);
     pre.insertAdjacentHTML('beforeend', ansiToHtml(text));
     if (pre.textContent.length > PRE_CHAR_CAP) {
       pre.textContent = pre.textContent.slice(-(PRE_CHAR_CAP * 0.6));
       pre.insertAdjacentHTML('afterbegin', '<span class="trunc">[较早输出已截断…]</span>');
     }
-    maybeScroll();
+    maybeScroll(near);
   }
 
   function addOutValue(el, count, text) {
+    var near = bottomNear();
     var d = document.createElement('pre');
     d.className = 'outval';
     // 多行输出（DataFrame 等）冒号后换行，列名从下一行起，与 IPython 原版一致
     var sep = text.indexOf('\n') >= 0 ? '\n' : ' ';
     d.innerHTML = '<span class="prompt prompt-out">Out[' + count + ']:</span>' + sep + esc(text);
     el.querySelector('.out').appendChild(d);
-    maybeScroll();
+    maybeScroll(near);
   }
 
   function addDisplayImg(el, b64) {
+    var near = bottomNear();
     var d = document.createElement('div');
     d.className = 'imgout';
     d.innerHTML = '<img src="data:image/png;base64,' + b64 + '">';
     el.querySelector('.out').appendChild(d);
-    maybeScroll();
+    maybeScroll(near);
   }
 
   function displayPlain(el, text) {
+    var near = bottomNear();
     var d = document.createElement('pre');
     d.className = 'outval';
     d.textContent = text;
     el.querySelector('.out').appendChild(d);
-    maybeScroll();
+    maybeScroll(near);
   }
 
   /* ---- 自动补全 ---- */
