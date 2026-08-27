@@ -74,18 +74,29 @@ extension → webview(包装为 `{type:'kernel', ...}`):上述 host 事件 + 附
 
 ## 构建 / 发布
 
-- 打包:`npx @vscode/vsce package`——**扩展图标必须 PNG**(`media/icon.png`;vsce 拒绝 SVG);
+**版本号铁律(2026-08-27 实战教训)**:用户会把**每个**由 AI 打包生成的 vsix 发布到
+微软商店。因此**任何代码改动(bug 修复 / 新特性)都必须先递增版本号再重打包**,
+禁止沿用已发布版本号。判断标准不是 CHANGELOG 是否标「待发布」,而是当前版本是否
+已发布——由于用户每次都发布,**默认当前版本已发布 → 一律升号**。
+递增规则:bug 修复 → patch +1(`1.3.1` → `1.3.2`);新特性 → minor +1(`1.3.x` → `1.4.0`)。
+已发布的版本号绝不复用(市场拒绝重复版本号,且装过商店旧号的用户收不到同号更新)。
+
+**发布全流程(顺序不可乱,缺一即未完成)**:
+1. 改代码,跑完「验证」节全部检查
+2. 升版本号,三处同步:`package.json`、`media/console.html` 前端 banner(`前端 vX.Y.Z`)、
+   `CHANGELOG.md` 新版本条目(Keep a Changelog 记「修复/新增」);修复条目必须挂在新
+   版本号下,不得塞进已发布的旧版本条目
+3. 重新 `npx @vscode/vsce package` 生成 `ipython-vscode-<新版本>.vsix`,
+   旧产物 `git rm` 替换(仓库只保留当前版本产物)
+4. 代码 / 文档 / 产物**同批 commit + push**(一次提交一个逻辑变更)
+5. publish 由用户执行(`npx @vscode/vsce publish`,publisher 为 `jiangsheng`);
+   AI 不代跑 publish,除非用户显式要求
+
+- 打包补充:**扩展图标必须 PNG**(`media/icon.png`;vsce 拒绝 SVG);
   vsce 只认根 `README.md` 为市场 README(自定义 readme 路径官方不支持);`DEVELOPMENT.md` 已被
   `.vscodeignore` 排除出包;`.vscodeignore` 必须保留 `*.vsix`(防打包产物打自己)。
-- 发布:`npx @vscode/vsce publish`——publisher 必须为 `jiangsheng`(已登录 PAT);
-  市场不接受重复版本号,发新版先做「三处版本标记同步」再打包提交。
-- **发版三处同步(缺一即未完成)**:`package.json` 版本号、`media/console.html` 前端
-  banner(`前端 vX.Y.Z`)、`CHANGELOG.md` 新版本条目,三者一致;CHANGELOG 按 Keep a
-  Changelog 格式记「修复/新增」条目,版本号与 package.json 同步。
 - **改代码必更文档 + 必重编译**:用户可见行为改动(设置项/命令/快捷键/输出/渲染)必须
-  同步 `README.md`(设置表/快速上手/说明);每次改动后重新 `npx @vscode/vsce package`
-  编译产物——代码 / 文档 / 产物必须同批提交,不允许只提交代码而漏文档或产物。
-- 仓库保持含打包产物 `ipython-vscode-<version>.vsix`,发新版时同步替换(rename)并 commit。
+  同步 `README.md`(设置表/快速上手/说明);产物必须与代码同批提交,不允许只提交代码而漏产物。
 
 ## 验证(每次改动后必做)
 
