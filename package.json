@@ -2,7 +2,7 @@
   "name": "ipython-vscode",
   "displayName": "IPython Console",
   "description": "qtconsole 手感的 IPython 控制台（真实 ipykernel）",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "publisher": "jiangsheng",
   "engines": {
     "vscode": "^1.85.0"
